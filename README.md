@@ -175,3 +175,11 @@ actions.
 Other environment variables the server reads: `LINKEDIN_COOKIE` (overrides the
 keyring), `LINKEDIN_HEADLESS` (default `true`), `LINKEDIN_NAV_TIMEOUT_MS` (default
 `30000`).
+
+## Licence
+
+[MIT](LICENSE) © 2026 Johannsen Lum.
+
+Use it, change it, redistribute it, build something commercial on it — the only
+condition is that you keep the copyright notice and licence text. It comes with no
+warranty of any kind.
