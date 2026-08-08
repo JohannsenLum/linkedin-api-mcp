@@ -1,0 +1,135 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------
+  # 1) Build + publish linkedin-api-mcp to PyPI via Trusted Publishing.
+  #    The environment name MUST be "pypi" to match the Trusted Publisher
+  #    registered on PyPI (project=linkedin-api-mcp, owner=JohannsenLum,
+  #    repo=linkedin-api-mcp, workflow=publish.yml, environment=pypi).
+  #    No API token is stored anywhere: id-token: write lets the runner
+  #    mint a short-lived OIDC token that PyPI exchanges for a publish
+  #    token scoped to this project alone.
+  # ---------------------------------------------------------------------
+  publish-pypi:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # No `patchright install` and no LINKEDIN_COOKIE: the suite stubs the
+      # browser, and a missing cookie is what guarantees a release build can
+      # never touch a real LinkedIn account.
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Read version from pyproject.toml
+        id: ver
+        run: |
+          VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      # The failure mode this guards against is "works from source, broken once
+      # installed" — the console script is how every user starts the server, and
+      # an entry point that only exists in the checkout is invisible until
+      # someone pip-installs and gets `command not found`.
+      - name: Verify the console script is declared in the wheel
+        run: |
+          python3 -m zipfile -l dist/*.whl | grep -E "entry_points\.txt" \
+            || (echo "::error::wheel has no entry_points.txt" && exit 1)
+          python3 - <<'PY'
+          import glob, zipfile, sys
+          whl = glob.glob("dist/*.whl")[0]
+          with zipfile.ZipFile(whl) as z:
+              name = next(n for n in z.namelist() if n.endswith("entry_points.txt"))
+              body = z.read(name).decode()
+          if "linkedin-api-mcp" not in body:
+              sys.exit("::error::linkedin-api-mcp console script missing from the wheel")
+          print("console script present:\n" + body)
+          PY
+
+      - name: Publish to PyPI
+        # Pinned to the exact commit behind v1.14.2 rather than a movable tag —
+        # a tag can be repointed, a commit SHA cannot.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          verbose: true
+
+  # ---------------------------------------------------------------------
+  # 2) Publish server.json to the official MCP Registry via GitHub OIDC.
+  #    Runs only after PyPI succeeds, because the registry verifies
+  #    ownership by reading the live PyPI project page.
+  # ---------------------------------------------------------------------
+  publish-mcp-registry:
+    name: Publish to MCP Registry
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PACKAGE_VERSION: ${{ needs.publish-pypi.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # PyPI's JSON API lags a few seconds behind the publish action returning
+      # success, and mcp-publisher's ownership check reads it. Poll rather than
+      # sleeping a fixed amount and hoping.
+      - name: Wait for linkedin-api-mcp on PyPI
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS "https://pypi.org/pypi/linkedin-api-mcp/${PACKAGE_VERSION}/json" >/dev/null; then
+              echo "linkedin-api-mcp ${PACKAGE_VERSION} is live on PyPI"
+              exit 0
+            fi
+            echo "not visible yet, retrying in 15s ($i/10)..."
+            sleep 15
+          done
+          echo "::error::linkedin-api-mcp ${PACKAGE_VERSION} never became resolvable on PyPI"
+          exit 1
+
+      - name: Sync server.json version with the published release
+        run: |
+          jq --arg v "$PACKAGE_VERSION" \
+             '.version = $v | .packages[0].version = $v' \
+             server.json > server.tmp.json
+          mv server.tmp.json server.json
+
+      - name: Install mcp-publisher v1.8.1
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" \
+            | tar xz mcp-publisher
+          ./mcp-publisher --help >/dev/null
+
+      - name: Authenticate to MCP Registry via GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate server.json
+
+      - name: Publish server to MCP Registry
+        run: ./mcp-publisher publish

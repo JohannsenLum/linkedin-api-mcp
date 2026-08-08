@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.JohannsenLum/linkedin-api-mcp",
+  "title": "LinkedIn",
+  "description": "Read LinkedIn profiles, companies, jobs, posts and messages through your own logged-in browser session",
+  "version": "0.0.1",
+  "repository": {
+    "url": "https://github.com/JohannsenLum/linkedin-api-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/JohannsenLum/linkedin-api-mcp#readme",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "linkedin-api-mcp",
+      "version": "0.0.1",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "LINKEDIN_COOKIE",
+          "description": "Your LinkedIn li_at session cookie. Optional if you have already stored it in the OS keyring with `linkedin-api-mcp auth`, which is the recommended route — this cookie is equivalent to being logged in as you.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "LINKEDIN_HEADLESS",
+          "description": "Run the browser headless. Defaults to true; set to 0 to watch what it does.",
+          "isRequired": false
+        },
+        {
+          "name": "LINKEDIN_MIN_INTERVAL",
+          "description": "Minimum seconds between LinkedIn actions. Defaults to 2.",
+          "isRequired": false
+        },
+        {
+          "name": "LINKEDIN_MAX_PER_HOUR",
+          "description": "Hard ceiling on LinkedIn actions per rolling hour. Defaults to 120. The server refuses past this rather than sleeping, so an agent in a loop is told to stop.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

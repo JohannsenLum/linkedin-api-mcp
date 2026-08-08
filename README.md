@@ -1,3 +1,5 @@
+<!-- mcp-name: io.github.JohannsenLum/linkedin-api-mcp -->
+
 # linkedin-api-mcp
 
 
