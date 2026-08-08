@@ -1,0 +1,158 @@
+name: Notify Telegram (CI)
+
+# A running log of what CI is doing on main, in Telegram.
+#
+# WHAT IT SENDS:
+#   - STARTED and FINISHED for every Test run on main, and every Publish. The pair
+#     brackets the work: a STARTED with no matching finish means the run hung or
+#     died silently, which a completion-only notifier cannot show you.
+#   - Green on main doubles as the "your push landed and is healthy" signal, which
+#     is what makes this a usable deployment log rather than a pure alarm.
+#
+#   - PR merges arrive here too, from notify-telegram.yml. Merge then green reads
+#     as one entry: "this landed, and the tree is fine."
+#
+# WHAT IT DELIBERATELY DOES NOT SEND:
+#   - Anything about a PR branch, except that CI is blocked awaiting your approval
+#     (which is routed to GH Approvals, not here). Contributors see their own CI;
+#     PR-branch noise would swamp this topic.
+#   - `in_progress`. It carries no information that STARTED did not.
+#
+# To dial this back if it gets noisy, in order of how much quiet you want:
+#   drop `requested` from the trigger types  -> finishes only
+#   add `conclusion != 'success'` to the if: -> failures and publishes only
+#
+# SECURITY: `workflow_run` always executes in the base-repo context, never with
+# PR code, so secrets are safe here. As with notify-telegram.yml, do NOT add a
+# checkout step, and keep untrusted values in `env:` rather than interpolating
+# them into `run:`.
+
+on:
+  workflow_run:
+    workflows: [Test, Publish]
+    # `requested` fires as the run starts, `completed` when it finishes — together
+    # they bracket the work, so a run that hangs or never reports is visible as a
+    # STARTED with no matching finish. This workflow is not itself in the watched
+    # list, so it cannot retrigger itself.
+    types: [requested, completed]
+
+permissions: {}
+
+jobs:
+  telegram:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.name == 'Publish' ||
+      github.event.workflow_run.conclusion == 'action_required' ||
+      github.event.workflow_run.head_branch == 'main'
+    steps:
+      - name: Send Telegram message
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Deployment/CI noise goes to Dev Ops. The one exception is "CI is waiting
+          # for your approval", which is about a specific PR and belongs where you'd
+          # act on it — it gets its own topic because it is rare, silently blocking,
+          # and has no other symptom. Unset -> posts to General.
+          TOPIC_DEVOPS: ${{ vars.TELEGRAM_TOPIC_DEVOPS }}
+          TOPIC_APPROVALS: ${{ vars.TELEGRAM_TOPIC_APPROVALS }}
+          # 'requested' when the run starts, 'completed' when it finishes.
+          ACTION: ${{ github.event.action }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
+          COMMIT_MSG: ${{ github.event.workflow_run.head_commit.message }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
+            echo "Telegram secrets not set — skipping."
+            exit 0
+          fi
+
+          # export, not plain assignment — the python heredoc is a subprocess.
+          # On a `requested` event `conclusion` is null, so status comes from ACTION.
+          if [ "$ACTION" = "requested" ]; then
+            export ICON="🔵" STATUS="STARTED"
+          else
+            case "$CONCLUSION" in
+              success)         export ICON="✅" STATUS="SUCCESS" ;;
+              failure)         export ICON="❌" STATUS="FAILURE" ;;
+              cancelled)       export ICON="⚪" STATUS="CANCELLED" ;;
+              action_required) export ICON="⏸️" STATUS="NEEDS APPROVAL" ;;
+              skipped)         export ICON="⏭️" STATUS="SKIPPED" ;;
+              *)               export ICON="⚠️" STATUS="$(printf '%s' "${CONCLUSION:-UNKNOWN}" | tr '[:lower:]' '[:upper:]')" ;;
+            esac
+          fi
+
+          # A fork PR from a first-time contributor holds CI until you approve it.
+          # Nothing else tells you that — you'd otherwise find out by wondering why
+          # a PR sat with no checks. Route it to the PR topic, where you'd act.
+          if [ "$CONCLUSION" = "action_required" ]; then
+            export TG_TOPIC="${TOPIC_APPROVALS:-}"
+          else
+            export TG_TOPIC="${TOPIC_DEVOPS:-}"
+          fi
+
+          python3 - <<'PY' > /tmp/ci_payload.json
+          import html, json, os
+
+          # Telegram's HTML mode allows only b/i/u/s/a/code/pre. Anything else
+          # returns 400 "can't parse entities" and the message silently vanishes,
+          # so escape every value that came from a human.
+          def esc(v, n):
+              return html.escape((v or "")[:n], quote=False)
+
+          wf = os.environ["WF_NAME"]
+          concl = os.environ.get("CONCLUSION") or ""
+          icon, status = os.environ["ICON"], os.environ["STATUS"]
+          # First line of the commit message only — bodies are long and noisy.
+          subject = (os.environ.get("COMMIT_MSG") or "").splitlines()
+          subject = subject[0] if subject else ""
+          sha = (os.environ.get("COMMIT_SHA") or "")[:7]
+
+          # A publish is the one event worth breaking the format for — it is the
+          # only thing here that reaches users rather than just the repo.
+          if wf == "Publish" and concl == "success":
+              headline = "🚀 <b>PUBLISHED</b> — PyPI and the MCP registry"
+          else:
+              headline = f"{icon} <b>{status}</b> — {esc(wf, 40)}"
+
+          lines = [
+              headline,
+              "",
+              f'<b>Repo:</b> <code>{esc(os.environ["REPO"], 120)}</code>',
+              f'<b>Workflow:</b> {esc(wf, 60)}',
+              f'<b>Branch:</b> {esc(os.environ.get("BRANCH"), 80)}',
+          ]
+          if sha:
+              lines.append(f'<b>Commit:</b> <code>{esc(sha, 12)}</code>')
+          if subject:
+              lines.append(f'<b>Message:</b> {esc(subject, 160)}')
+          lines.append(f'<b>Actor:</b> {esc(os.environ.get("ACTOR"), 80)}')
+          lines += ["", f'<a href="{esc(os.environ["RUN_URL"], 300)}">View run</a>']
+
+          payload = {
+              "chat_id": os.environ["TG_CHAT"],
+              "text": "\n".join(lines),
+              "parse_mode": "HTML",
+              "disable_web_page_preview": True,
+          }
+          # Only send message_thread_id when a topic is configured: passing it to a
+          # non-forum chat is a 400, so an unset variable must mean "omit", not "0".
+          topic = (os.environ.get("TG_TOPIC") or "").strip()
+          if topic:
+              payload["message_thread_id"] = int(topic)
+          print(json.dumps(payload))
+          PY
+
+          curl -sS --fail-with-body --max-time 20 \
+            -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -H 'Content-Type: application/json' \
+            -d @/tmp/ci_payload.json > /dev/null
+
+          echo "Notified: $WF_NAME $STATUS on $BRANCH -> topic ${TG_TOPIC:-General}"

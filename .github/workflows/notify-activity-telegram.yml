@@ -1,0 +1,114 @@
+name: Notify Telegram (Activity)
+
+# Growth and release signals — the things that tell you the project is being used
+# rather than worked on. Kept separate from the PR/Review/Issue topics because
+# these need no response: they are a record, not a queue.
+#
+#   fork      someone forked the repo
+#   watch     someone starred it (GitHub's event for a star is "watch"/started)
+#   release   a GitHub release was published
+#
+# Each carries the running total, so a single message answers "how are we doing"
+# without opening GitHub.
+#
+# SECURITY: no checkout, no PR code, `permissions: {}`. Untrusted values go
+# through `env:` and are HTML-escaped in python — never interpolated into `run:`.
+
+on:
+  fork:
+  watch:
+    types: [started]
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  telegram:
+    runs-on: ubuntu-latest
+    # Bots don't star or fork meaningfully, and a bot-published release is still
+    # worth hearing about — so only the obviously-noisy case is filtered.
+    if: github.event_name != 'watch' || github.event.sender.type != 'Bot'
+    steps:
+      - name: Send Telegram message
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TG_TOPIC: ${{ vars.TELEGRAM_TOPIC_ACTIVITY }}
+          KIND: ${{ github.event_name }}
+          ACTOR: ${{ github.event.sender.login }}
+          REPO: ${{ github.repository }}
+          STARS: ${{ github.event.repository.stargazers_count }}
+          FORKS: ${{ github.event.repository.forks_count }}
+          FORK_NAME: ${{ github.event.forkee.full_name }}
+          FORK_URL: ${{ github.event.forkee.html_url }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          ACTOR_URL: ${{ github.event.sender.html_url }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
+            echo "Telegram secrets not set — skipping."
+            exit 0
+          fi
+
+          python3 - <<'PY' > /tmp/activity.json
+          import html, json, os
+
+          def esc(v, n):
+              return html.escape((v or "")[:n], quote=False)
+
+          kind = os.environ["KIND"]
+          actor = esc(os.environ.get("ACTOR"), 80)
+          stars = os.environ.get("STARS") or "?"
+          forks = os.environ.get("FORKS") or "?"
+
+          if kind == "fork":
+              lines = [
+                  f"🍴 <b>{actor}</b> forked the repo",
+                  f"<code>{esc(os.environ.get('FORK_NAME'), 120)}</code>",
+                  "",
+                  f"{forks} forks · {stars} stars",
+                  "",
+                  os.environ.get("FORK_URL") or "",
+              ]
+          elif kind == "watch":
+              lines = [
+                  f"⭐ <b>{actor}</b> starred the repo",
+                  "",
+                  f"{stars} stars · {forks} forks",
+                  "",
+                  os.environ.get("ACTOR_URL") or "",
+              ]
+          else:  # release
+              tag = esc(os.environ.get("RELEASE_TAG"), 40)
+              name = esc(os.environ.get("RELEASE_NAME"), 120)
+              lines = [f"🏷️ <b>Release {tag}</b> published"]
+              if name and name != tag:
+                  lines.append(name)
+              body = (os.environ.get("RELEASE_BODY") or "").strip()
+              if body:
+                  lines += ["", esc(body, 400)]
+              lines += ["", os.environ.get("RELEASE_URL") or ""]
+
+          payload = {
+              "chat_id": os.environ["TG_CHAT"],
+              "text": "\n".join(x for x in lines if x is not None),
+              "parse_mode": "HTML",
+              "disable_web_page_preview": True,
+          }
+          topic = (os.environ.get("TG_TOPIC") or "").strip()
+          if topic:
+              payload["message_thread_id"] = int(topic)
+          print(json.dumps(payload))
+          PY
+
+          curl -sS --fail-with-body --max-time 20 \
+            -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -H 'Content-Type: application/json' \
+            -d @/tmp/activity.json > /dev/null
+
+          echo "Notified: $KIND by ${ACTOR:-?}"

