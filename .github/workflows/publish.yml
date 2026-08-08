@@ -78,6 +78,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           verbose: true
+          # PyPI refuses to overwrite an existing version, so a re-run of this
+          # workflow — to retry the registry step, say — would otherwise fail on
+          # a publish that already succeeded. Skip instead, and let the registry
+          # job proceed.
+          skip-existing: true
 
   # ---------------------------------------------------------------------
   # 2) Publish server.json to the official MCP Registry via GitHub OIDC.
