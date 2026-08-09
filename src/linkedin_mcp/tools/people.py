@@ -335,6 +335,88 @@ _TOP_CARD_JS = r"""() => {
 }"""
 
 
+# Search results are nested hashed divs: no <li>, no stable classes, and every
+# label rendered twice (once visible, once for screen readers). The structural
+# rule that does hold is that a result row is the smallest ancestor containing
+# exactly ONE profile link, so climbing stops the moment a container would
+# swallow a second person.
+_SEARCH_ROWS_JS = r"""(limit) => {
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+
+  // Buttons and badges that sit inside a result row and are not profile data.
+  const UI = /^(message|connect|follow|following|view profile|save|more|pending|withdraw|\+|1st|2nd|3rd)$/i;
+  const NOISE = /^(summary:|past:|current:|is open to work|open to work|shared connection|mutual)/i;
+
+  // Text nodes in document order, deduplicated. LinkedIn renders each label twice,
+  // once visible and once for screen readers, so a plain textContent read gives
+  // "Basil Boh Basil Boh . 1st...". Walking text nodes and dropping repeats keeps
+  // the fields separate, which is the whole difficulty here.
+  const rowStrings = (root) => {
+    const out = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walker.nextNode())) {
+      const t = clean(n.nodeValue);
+      if (t && out[out.length - 1] !== t && !out.includes(t)) out.push(t);
+    }
+    return out;
+  };
+
+  const seen = new Set();
+  const out = [];
+
+  // Only the results list. Sidebars ("People you may know", "also viewed") carry
+  // /in/ links too, and climbing from those lands on a container spanning several
+  // people, which is where the garbled rows came from.
+  const scope = document.querySelector('main');
+  if (!scope) return [];
+
+  for (const a of scope.querySelectorAll('a[href*="/in/"]')) {
+    const m = (a.getAttribute('href') || '').match(/\/in\/([^/?#]+)/);
+    if (!m || m[1] === 'me' || seen.has(m[1])) continue;
+
+    // Climb until the container holds the whole row, not just the name link.
+    // There is no <li> here: results are nested hashed divs. The structural rule
+    // that does hold is that a row contains exactly ONE profile link. Climb while
+    // that stays true, and stop the moment the container swallows a second person,
+    // which is what produced the garbled rows before.
+    let row = a, strings = [];
+    for (let i = 0; i < 8 && row.parentElement && row.parentElement !== scope; i++) {
+      const parent = row.parentElement;
+      if (parent.querySelectorAll('a[href*="/in/"]').length > 1) break;
+      row = parent;
+      strings = rowStrings(row);
+      if (strings.length >= 4) break;
+    }
+    if (strings.length < 3) continue;
+
+    const degree = (strings.find(s => /^[•·]?\s*(1st|2nd|3rd)$/i.test(s)) || '')
+                     .replace(/[^0-9a-z]/gi, '') || null;
+    const fields = strings.filter(s => !UI.test(s) && !NOISE.test(s) && !/^[•·]/.test(s));
+    if (!fields.length) continue;
+
+    seen.add(m[1]);
+    out.push({
+      name: fields[0] || null,
+      public_id: m[1],
+      profile_url: 'https://www.linkedin.com/in/' + m[1] + '/',
+      degree: degree,
+      headline: fields[1] || null,
+      location: fields[2] || null,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}"""
+
+
+async def _read_search_rows(page: Any, limit: int) -> list[dict[str, Any]]:
+    try:
+        return await page.evaluate(_SEARCH_ROWS_JS, limit) or []
+    except Exception:
+        return []
+
+
 async def _read_top_card(page: Any) -> dict[str, Any]:
     try:
         return await page.evaluate(_TOP_CARD_JS) or {}
@@ -652,8 +734,34 @@ async def do_search_people(
     async def _run() -> dict:
         page = await session.goto(
             f"/search/results/people/?keywords={quote_plus(keywords)}",
-            wait_for="ul[role='list'], div.search-results-container",
+            wait_for="main",
         )
+
+        # Structural read first. It is the only one that works against LinkedIn's
+        # current markup; the selector path below stays as a fallback in case an
+        # account is served an older layout.
+        rows = await _read_search_rows(page, effective_limit)
+        if rows:
+            return {
+                "keywords": keywords,
+                "count": len(rows),
+                "results": [
+                    {
+                        "name": clean(r.get("name")),
+                        "public_id": r.get("public_id"),
+                        "profile_url": r.get("profile_url"),
+                        "degree": r.get("degree"),
+                        "headline": clean(r.get("headline")),
+                        "location": clean(r.get("location")),
+                    }
+                    for r in rows
+                ],
+                **(
+                    {"limit_capped": True, "note": f"Capped at {_MAX_SEARCH_LIMIT} results."}
+                    if capped
+                    else {}
+                ),
+            }
 
         items = await _find_items(page, _SEARCH_ITEM_SELECTORS, effective_limit)
         results: list[dict[str, Any]] = []
