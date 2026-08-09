@@ -526,15 +526,28 @@ async def _reply_to_thread(session: Session, conversation_id: str, text: str) ->
 # <other person>" links in the sidebar. Matching on exact visible text inside the
 # top card is what tells them apart; matching on class names does not work at all,
 # since LinkedIn ships hashed per-build classes now.
-_FIND_MESSAGE_CONTROL_JS = r"""() => {
+_FIND_COMPOSE_HREF_JS = r"""() => {
   const clean = t => (t || '').replace(/\s+/g, ' ').trim();
   const main = document.querySelector('main');
   if (!main) return null;
-  const controls = [...main.querySelectorAll('a,button')];
-  const exact = controls.find(c => clean(c.innerText).toLowerCase() === 'message');
-  if (!exact) return null;
-  exact.setAttribute('data-lnkdn-mcp-target', '1');
-  return true;
+
+  // The "Message" control is an <a> pointing at /messaging/compose/?recipient=<urn>.
+  // Navigating that href is far more reliable than clicking, because LinkedIn's
+  // React handler ignores a synthetic click and Playwright's trusted click times
+  // out on the overlay.
+  //
+  // Two kinds of decoy sit beside it and both would send the wrong thing:
+  //   screenContext=PROFILE_HIGHLIGHTS links carry a prefilled body= ("Hi Basil,
+  //     we both worked at PayPal..."), which would go out instead of the caller's text
+  //   sidebar links point at an entirely different person's urn
+  // Requiring NON_SELF_PROFILE_VIEW and no body= rejects both.
+  const links = [...main.querySelectorAll('a[href*="/messaging/compose/"]')]
+    .filter(a => clean(a.innerText).toLowerCase() === 'message');
+  const hit = links.find(a => {
+    const h = a.getAttribute('href') || '';
+    return h.includes('NON_SELF_PROFILE_VIEW') && !h.includes('body=');
+  });
+  return hit ? hit.getAttribute('href') : null;
 }"""
 
 # After clicking send, confirm the text actually landed in the thread. Without this
@@ -572,13 +585,16 @@ async def _message_new_recipient(session: Session, recipient: str, text: str) ->
     # Structural first: mark the control whose visible text is exactly "Message",
     # then grab it. Falls back to the old selectors if LinkedIn serves an older
     # layout to this account.
-    msg_btn = None
+    compose_href = None
     try:
-        if await page.evaluate(_FIND_MESSAGE_CONTROL_JS):
-            msg_btn = await page.query_selector("[data-lnkdn-mcp-target]")
+        compose_href = await page.evaluate(_FIND_COMPOSE_HREF_JS)
     except Exception:
-        msg_btn = None
-    if msg_btn is None:
+        compose_href = None
+
+    if compose_href:
+        page = await session.goto(compose_href)
+        msg_btn = True  # already in compose; nothing left to click open
+    else:
         msg_btn = await _query_first(page, _MESSAGE_BUTTON_SELECTORS)
     if msg_btn is None:
         raise LinkedInError(
@@ -589,10 +605,11 @@ async def _message_new_recipient(session: Session, recipient: str, text: str) ->
             "reply within an existing thread using conversation_id instead.",
         )
 
-    try:
-        await msg_btn.click()
-    except Exception:
-        raise parse_failed("the message compose overlay")
+    if msg_btn is not True:
+        try:
+            await msg_btn.click()
+        except Exception:
+            raise parse_failed("the message compose overlay")
 
     box = None
     for _ in range(10):
