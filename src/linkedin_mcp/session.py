@@ -24,6 +24,57 @@ _LOGIN_MARKERS = ("/login", "/uas/login", "/authwall", "/signup")
 _CHECKPOINT_MARKERS = ("/checkpoint", "/challenge")
 
 
+def _classify_navigation_failure(exc: Exception) -> LinkedInError:
+    """Turn a Chromium network error into something the user can act on.
+
+    The exception's text is READ here to classify, and never returned: it embeds
+    the URL being driven, which on LinkedIn can carry session-scoped parameters.
+
+    The redirect loop is the case worth singling out. A malformed `li_at` sends
+    LinkedIn into a cycle: the feed bounces to login because the session is not
+    valid, login bounces back to the feed because a cookie is present, and
+    Chromium gives up after twenty hops. An expired cookie does not do this, it
+    lands cleanly on /login and is caught below as not_authenticated. So a
+    redirect loop on linkedin.com means the cookie is the wrong shape rather
+    than merely stale, and telling the user to check their network sends them
+    looking in entirely the wrong place.
+    """
+    text = str(exc)
+
+    if "ERR_TOO_MANY_REDIRECTS" in text:
+        return LinkedInError(
+            "bad_cookie",
+            "LinkedIn redirected in a loop, which means the session cookie is malformed.",
+            "This is not a network problem. Copy the `li_at` value again from DevTools -> "
+            "Application -> Cookies -> https://www.linkedin.com, taking the Value column "
+            "only, then re-run `linkedin-api-mcp auth`. A cookie that is merely expired "
+            "fails differently, so this points at a truncated or mistyped value.",
+        )
+
+    for marker in ("ERR_NAME_NOT_RESOLVED", "ERR_INTERNET_DISCONNECTED", "ERR_CONNECTION_"):
+        if marker in text:
+            return LinkedInError(
+                "network_unreachable",
+                "The browser could not reach linkedin.com.",
+                "Check this machine's network connection, DNS, and any VPN or proxy that "
+                "might be blocking it.",
+            )
+
+    if "ERR_CERT" in text or "SSL" in text:
+        return LinkedInError(
+            "tls_failure",
+            "The TLS handshake with linkedin.com failed.",
+            "Usually a proxy or corporate network intercepting HTTPS. Try from a different "
+            "network to confirm.",
+        )
+
+    return LinkedInError(
+        "navigation_failed",
+        "The browser could not load the page.",
+        "Check that linkedin.com is reachable from this machine.",
+    )
+
+
 class Session:
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -100,11 +151,7 @@ class Session:
         except Exception as exc:
             if "Timeout" in type(exc).__name__ or "timeout" in str(type(exc)).lower():
                 raise timed_out(f"{path} to load") from exc
-            raise LinkedInError(
-                "navigation_failed",
-                "The browser could not load the page.",
-                "Check that linkedin.com is reachable from this machine.",
-            ) from exc
+            raise _classify_navigation_failure(exc) from exc
 
         landed = self._page.url
         if any(m in landed for m in _CHECKPOINT_MARKERS):
