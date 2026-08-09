@@ -287,6 +287,60 @@ def _list_item_selectors(anchor_id: str) -> tuple[str, ...]:
     )
 
 
+
+# LinkedIn serves hashed, per-build class names (`b0712e9a`, `_129ac5aa`), so any
+# selector naming a class is broken within the week. It also dropped the section
+# anchors (`id="experience"`) that used to make sections addressable.
+#
+# What survives a rebuild: document.title, href patterns, heading structure, and
+# the shape of the text itself. This extracts the whole top card from those alone.
+_TOP_CARD_JS = r"""() => {
+  const txt = (el) => el ? el.textContent.replace(/\s+/g, ' ').trim() : null;
+
+  // The name: document.title is "Name | LinkedIn" and survives every rebuild.
+  // Fall back to the heading inside the profile anchor if the title is unusual.
+  let name = (document.title || '').split('|')[0].trim() || null;
+
+  // The top card is the section containing the anchor back to this profile.
+  const selfLink = document.querySelector('main a[href*="/in/"]');
+  const card = selfLink ? (selfLink.closest('section') || selfLink.parentElement?.parentElement?.parentElement) : null;
+  if (!name && selfLink) name = txt(selfLink.querySelector('h1,h2,h3'));
+
+  // public id comes from the URL, which has resolved by now, else from the anchor.
+  const fromUrl = window.location.pathname.match(/\/in\/([^/?#]+)/);
+  const fromLink = selfLink ? (selfLink.getAttribute('href') || '').match(/\/in\/([^/?#]+)/) : null;
+  const public_id = (fromUrl && fromUrl[1] !== 'me') ? fromUrl[1] : (fromLink ? fromLink[1] : null);
+
+  // The card's paragraphs, in visual order, are: pronouns?, headline, org line, location.
+  // Classifying by position is fragile, so classify by shape instead.
+  const lines = card ? [...card.querySelectorAll('p')]
+      .map(p => txt(p)).filter(Boolean)
+      .filter((v, i, a) => a.indexOf(v) === i)          // LinkedIn duplicates for a11y
+      .filter(v => v !== name) : [];
+
+  const PRONOUNS = /^(he|she|they|him|her|them)\b.{0,20}$/i;
+  const pronouns = lines.find(l => PRONOUNS.test(l)) || null;
+  const rest = lines.filter(l => l !== pronouns);
+
+  // The org line uses a middot to join employer and school; the headline rarely does.
+  const orgLine = rest.find(l => l.includes('·')) || null;
+  // Location is short, has no middot, and is not the headline.
+  const headline = rest.find(l => l !== orgLine && l.length > 25) || rest[0] || null;
+  const place = rest.find(l => l !== orgLine && l !== headline && l.length <= 60) || null;
+
+  return {
+    name, public_id, pronouns, headline, location: place,
+    organisations: orgLine ? orgLine.split('·').map(s => s.trim()).filter(Boolean) : [],
+  };
+}"""
+
+
+async def _read_top_card(page: Any) -> dict[str, Any]:
+    try:
+        return await page.evaluate(_TOP_CARD_JS) or {}
+    except Exception:
+        return {}
+
 async def _extract_section_items(page: Any, anchor_id: str, limit: int) -> list[Any]:
     """Up to `limit` entries under a named profile section, or [] if the
     person simply doesn't have that section.
@@ -479,14 +533,16 @@ def _normalize_sections(sections: list[str] | None) -> tuple[tuple[str, ...], tu
 async def _scrape_profile(
     session: Session, page: Any, pid: str, sections: tuple[str, ...]
 ) -> dict[str, Any]:
-    name = clean(await _first_text(page, _NAME_SELECTORS))
+    card = await _read_top_card(page)
+
+    name = clean(card.get("name")) or clean(await _first_text(page, _NAME_SELECTORS))
     if not name:
         if await _first_text(page, _NOT_AVAILABLE_SELECTORS):
             raise not_found(f"Profile '{pid}'")
         raise parse_failed("the profile name")
 
-    headline = clean(await _first_text(page, _HEADLINE_SELECTORS))
-    location = clean(await _first_text(page, _LOCATION_SELECTORS))
+    headline = clean(card.get("headline")) or clean(await _first_text(page, _HEADLINE_SELECTORS))
+    location = clean(card.get("location")) or clean(await _first_text(page, _LOCATION_SELECTORS))
     connections = clean(await _first_text(page, _CONNECTIONS_SELECTORS))
     followers = clean(await _first_text(page, _FOLLOWERS_SELECTORS))
     about = clean(await _first_text(page, _ABOUT_SELECTORS))

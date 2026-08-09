@@ -23,6 +23,11 @@ BASE = "https://www.linkedin.com"
 _LOGIN_MARKERS = ("/login", "/uas/login", "/authwall", "/signup")
 _CHECKPOINT_MARKERS = ("/checkpoint", "/challenge")
 
+# How long to let the single-page app settle after the document loads. Generous
+# enough for a profile to render, short enough that a permanently-chattering feed
+# does not stall a tool call.
+_SETTLE_MS = 12_000
+
 
 def _classify_navigation_failure(exc: Exception) -> LinkedInError:
     """Turn a Chromium network error into something the user can act on.
@@ -152,6 +157,20 @@ class Session:
             if "Timeout" in type(exc).__name__ or "timeout" in str(type(exc)).lower():
                 raise timed_out(f"{path} to load") from exc
             raise _classify_navigation_failure(exc) from exc
+
+        # LinkedIn is a single-page app: at domcontentloaded the shell exists but the
+        # content does not, and `/in/me/` has not yet resolved to the real profile,
+        # because that redirect happens client-side. Reading either now gives the
+        # wrong answer, so wait for the app to settle.
+        #
+        # The timeout is swallowed on purpose. Feed-like pages poll in the background
+        # and may never reach networkidle, and a page that is merely still chattering
+        # is usually readable anyway. Waiting is best-effort; the parsers already
+        # degrade when a field is missing.
+        try:
+            await self._page.wait_for_load_state("networkidle", timeout=_SETTLE_MS)
+        except Exception:
+            pass
 
         landed = self._page.url
         if any(m in landed for m in _CHECKPOINT_MARKERS):

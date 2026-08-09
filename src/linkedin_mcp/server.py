@@ -374,6 +374,45 @@ async def _check_status(session: Session, queue: ActionQueue, config: Config) ->
 # ---------------------------------------------------------------------------
 
 
+def _read_cookie_interactively() -> str:
+    """Get the cookie without it appearing on screen or in shell history.
+
+    getpass needs a terminal it can switch echo off on. Plenty of places that run
+    this do not have one: a piped shell, a container, CI, an editor's embedded
+    terminal. There getpass raises, and an unhandled traceback on the very first
+    command a user runs is a bad introduction.
+
+    So: if stdin is not a terminal, read a piped line instead. That makes
+    `pbpaste | linkedin-api-mcp auth` work, which is better than typing it anyway,
+    since the value never reaches the shell history either.
+    """
+    if not sys.stdin.isatty():
+        line = sys.stdin.readline()
+        if not line:
+            print(
+                "No terminal available to prompt on, and nothing was piped in.\n\n"
+                "Pipe the cookie instead. On macOS, copy it from DevTools and run:\n"
+                "    pbpaste | linkedin-api-mcp auth\n\n"
+                "Or set it for one session without storing it:\n"
+                "    export LINKEDIN_COOKIE='...'",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        return line
+
+    try:
+        return getpass.getpass("li_at: ")
+    except (EOFError, OSError):
+        # Some terminals report as a tty but refuse the echo change.
+        print(
+            "This terminal will not let the prompt hide your input, so nothing was read.\n\n"
+            "Pipe it in instead, which keeps it out of your shell history too:\n"
+            "    pbpaste | linkedin-api-mcp auth",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
+
+
 def _cmd_auth() -> None:
     print(
         "Paste your LinkedIn session cookie (`li_at`).\n"
@@ -381,7 +420,7 @@ def _cmd_auth() -> None:
         "Input is hidden and never echoed back.",
         file=sys.stderr,
     )
-    cookie = getpass.getpass("li_at: ")
+    cookie = _read_cookie_interactively()
     if not cookie.strip():
         print("Nothing entered; not stored.", file=sys.stderr)
         raise SystemExit(1)
