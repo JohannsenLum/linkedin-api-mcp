@@ -508,14 +508,78 @@ async def _reply_to_thread(session: Session, conversation_id: str, text: str) ->
             "LinkedIn may have changed the compose flow. Check the conversation in your browser.",
         )
 
+    # Same guarantee as the compose path: a click that did not throw is not
+    # evidence of delivery.
+    if not await _confirm_sent(page, text):
+        raise LinkedInError(
+            "send_unconfirmed",
+            "The reply was attempted but never appeared in the thread.",
+            "Treat this as NOT sent. Check the conversation in your browser before retrying, "
+            "so you do not send it twice.",
+        )
+
     return conversation_id
+
+
+# LinkedIn's profile top card carries a "Message" control that is an <a>, not a
+# button, and sits alongside decoys: "Message with Premium" upsells, and "Message
+# <other person>" links in the sidebar. Matching on exact visible text inside the
+# top card is what tells them apart; matching on class names does not work at all,
+# since LinkedIn ships hashed per-build classes now.
+_FIND_MESSAGE_CONTROL_JS = r"""() => {
+  const clean = t => (t || '').replace(/\s+/g, ' ').trim();
+  const main = document.querySelector('main');
+  if (!main) return null;
+  const controls = [...main.querySelectorAll('a,button')];
+  const exact = controls.find(c => clean(c.innerText).toLowerCase() === 'message');
+  if (!exact) return null;
+  exact.setAttribute('data-lnkdn-mcp-target', '1');
+  return true;
+}"""
+
+# After clicking send, confirm the text actually landed in the thread. Without this
+# the flow reports success for any click that merely did not throw, which is how a
+# write tool ends up lying about having contacted a real person.
+_MESSAGE_PRESENT_JS = r"""(needle) => {
+  const body = (document.body.innerText || '').replace(/\s+/g, ' ');
+  return body.includes(needle);
+}"""
+
+
+async def _confirm_sent(page: Any, text: str, attempts: int = 20) -> bool:
+    """Poll until the sent text appears on the page, or give up.
+
+    Deliberately checks the text rather than a toast or a spinner: a toast can
+    appear for a draft, and a spinner tells you something is happening, not that
+    it worked. The message being visible in the thread is the only signal that
+    means what we want it to mean.
+    """
+    needle = " ".join(text.split())[:60]
+    for _ in range(attempts):
+        try:
+            if await page.evaluate(_MESSAGE_PRESENT_JS, needle):
+                return True
+        except Exception:
+            pass
+        await page.wait_for_timeout(400)
+    return False
 
 
 async def _message_new_recipient(session: Session, recipient: str, text: str) -> None:
     who = public_id(recipient)
     page = await session.goto(f"/in/{who}/", wait_for="main")
 
-    msg_btn = await _query_first(page, _MESSAGE_BUTTON_SELECTORS)
+    # Structural first: mark the control whose visible text is exactly "Message",
+    # then grab it. Falls back to the old selectors if LinkedIn serves an older
+    # layout to this account.
+    msg_btn = None
+    try:
+        if await page.evaluate(_FIND_MESSAGE_CONTROL_JS):
+            msg_btn = await page.query_selector("[data-lnkdn-mcp-target]")
+    except Exception:
+        msg_btn = None
+    if msg_btn is None:
+        msg_btn = await _query_first(page, _MESSAGE_BUTTON_SELECTORS)
     if msg_btn is None:
         raise LinkedInError(
             "not_found",
@@ -558,8 +622,17 @@ async def _message_new_recipient(session: Session, recipient: str, text: str) ->
             "LinkedIn may have changed the compose flow. Check the conversation in your browser.",
         )
 
-    # The overlay compose window doesn't expose the resulting thread id in the URL the
-    # way /messaging/thread/{id}/ does. Callers who need it can find it via get_inbox.
+    # Prove it. Clicking without checking is how this tool previously reported
+    # success for a message that was never delivered, which is worse than failing:
+    # the caller believes they contacted someone and waits for a reply.
+    if not await _confirm_sent(page, text):
+        raise LinkedInError(
+            "send_unconfirmed",
+            "The send was attempted but the message never appeared in the conversation.",
+            "Treat this as NOT sent. Open the conversation in your browser to check before "
+            "trying again, so you do not send it twice. If the message is absent there too, "
+            "LinkedIn has changed the compose flow and this is a bug worth reporting.",
+        )
 
 
 async def do_send_message(
