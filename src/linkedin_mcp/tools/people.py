@@ -322,11 +322,23 @@ _TOP_CARD_JS = r"""() => {
   const pronouns = lines.find(l => PRONOUNS.test(l)) || null;
   const rest = lines.filter(l => l !== pronouns);
 
-  // The org line uses a middot to join employer and school; the headline rarely does.
-  const orgLine = rest.find(l => l.includes('·')) || null;
-  // Location is short, has no middot, and is not the headline.
-  const headline = rest.find(l => l !== orgLine && l.length > 25) || rest[0] || null;
-  const place = rest.find(l => l !== orgLine && l !== headline && l.length <= 60) || null;
+  // The card is consistently ordered:  [pronouns/degree]  headline  org-line  location
+  // where the org line joins employer and school with a middot. Anchoring on that
+  // line is what makes this reliable: the headline is whatever precedes it and the
+  // location is whatever follows, on every profile checked.
+  //
+  // Earlier attempts classified by length ("the headline is the long one"), which
+  // silently returned the org line for a short headline such as "Analyst @ SGX |
+  // NUS CS", and picked up "226 connections" as a location. Position relative to
+  // the org line has no such failure mode.
+  const isDegree = l => /\b(1st|2nd|3rd)\b/.test(l) || /^[·•\s]+$/.test(l);
+  const usable = rest.filter(l => l && !isDegree(l));
+
+  const orgIndex = usable.findIndex(l => l.includes('·'));
+  const orgLine = orgIndex >= 0 ? usable[orgIndex] : null;
+
+  const headline = orgIndex > 0 ? usable[orgIndex - 1] : (usable[0] || null);
+  const place = orgIndex >= 0 ? (usable[orgIndex + 1] || null) : null;
 
   return {
     name, public_id, pronouns, headline, location: place,

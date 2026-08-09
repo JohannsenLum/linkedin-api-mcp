@@ -158,7 +158,21 @@ def _clean_conversation_id(conversation_id: str | None) -> str:
 # Inbox listing
 # ---------------------------------------------------------------------------
 
-_CONTAINER_SELECTOR = ".msg-conversations-container"
+# `.msg-conversations-container` (bare) was the wait_for/existence-check target
+# here, and it no longer exists anywhere in the DOM: every element in the
+# current markup only carries a *namespaced* form of it
+# (`msg-conversations-container__pillar`, `--inbox-shortcuts`, etc.), never the
+# bare class. Waiting on it burns the full navigation timeout on every call
+# before falling through to a `parse_failed` that has nothing to do with the
+# actual page content, confirmed against a captured `/messaging/` page. The
+# `aria-label` on the list survives because it's there for screen readers, not
+# styling, so it's tried first; the old bare class stays last as the
+# documented fallback for an account served an older layout.
+_CONTAINER_SELECTOR = (
+    'ul[aria-label="Conversation List"], '
+    ".msg-conversations-container__conversations-list, "
+    ".msg-conversations-container"
+)
 _LIST_SELECTOR = ".msg-conversations-container__conversations-list, .msg-conversations-container ul"
 _CARD_SELECTOR = "li.msg-conversation-listitem, li.msg-conversation-card, div.msg-conversation-listitem"
 
@@ -187,6 +201,114 @@ _UNREAD_BADGE_SELECTORS = (
     ".msg-conversation-card__unread-count",
     ".msg-conversation-listitem__unread-count",
 )
+
+
+# Unlike the profile and search pages, LinkedIn's messaging surface still ships
+# real, unhashed BEM class names (`msg-conversation-card__...`), so the class
+# selectors above mostly find the right element once they're not pointed at a
+# selector that plain no longer exists. What they can't do is separate a
+# conversation row's fields from LinkedIn's own accessibility noise: every row
+# repeats the presence dot ("Status is reachable"), the checkbox label
+# ("Select conversation with X"), the unread badge as both a bare digit and a
+# sentence ("1 new notification"), and a "Press return to go to conversation
+# details" instruction, all as their own text nodes inside the same card. A
+# selector-per-field approach either grabs that noise too or needs one new
+# selector per noise phrase LinkedIn adds. Walking text nodes and classifying
+# by shape (rule 3 + rule 4) sidesteps both: filter out anything that matches
+# the noise shapes, then the timestamp is whatever's left that looks like a
+# clock time or an abbreviated date, the name is the first remaining line, and
+# the preview is the rest.
+#
+# What this cannot do, in the current markup: give back a conversation_id.
+# A row here has no href and no data-urn anywhere in its subtree (verified
+# against a captured `/messaging/` page) — LinkedIn binds the click to an
+# in-memory Ember reference, not a URL, so there is nothing structural to read
+# without actually clicking every row, which turns one inbox read into N
+# extra navigations. The href-based lookup is kept below as a fallback in case
+# an older cohort still renders one; when it finds nothing, conversation_id
+# comes back null rather than a guess, same as participant_public_id.
+_INBOX_ROWS_JS = r"""(limit) => {
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+
+  // Leading ". " shows up on several of these because LinkedIn injects a
+  // pause for screen readers ahead of the sentence; strip it before matching
+  // shape so "  . Press return..." still matches the phrase, not just the
+  // exact string.
+  const NOISE = /^\.?\s*(status is |select conversation with|open the options list|press return|active conversation$|\d+\s+new (notification|feed|network))/i;
+  const COUNT_BADGE = /^\d+\+?$/;                          // "2+" group overflow badge, bare unread digit
+  const LABEL = /^(sponsored|inmail|linkedin offer)$/i;    // pill badges LinkedIn puts ahead of the real preview
+
+  // A clock time ("6:42 PM") for today, or an abbreviated date ("Aug 6") for
+  // anything older: this is the one field worth a shape check on its own,
+  // since it is what tells "name" and "preview" apart from each other once
+  // the noise is gone.
+  const TIME_RE = /^\d{1,2}:\d{2}\s?[AP]M$/i;
+  const DATE_RE = /^[A-Za-z]{3,9}\s+\d{1,2}$/;
+
+  const rowStrings = (root) => {
+    const out = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walker.nextNode())) {
+      const t = clean(n.nodeValue);
+      if (t && out[out.length - 1] !== t) out.push(t);
+    }
+    return out;
+  };
+
+  const list = document.querySelector('ul[aria-label="Conversation List"]')
+            || document.querySelector('.msg-conversations-container__conversations-list');
+  if (!list) return [];
+
+  const out = [];
+  for (const li of list.children) {
+    if (out.length >= limit) break;
+
+    // Virtualised rows scrolled out of view render as an empty <li></li>
+    // until scrolled into view: no card, nothing to read, not an error. The
+    // "Load more conversations" pager row at the bottom has no card either.
+    const card = li.querySelector('[class*="msg-conversation-card"]');
+    if (!card) continue;
+
+    const strings = rowStrings(card).filter((s) => !NOISE.test(s) && !COUNT_BADGE.test(s));
+    if (!strings.length) continue;
+
+    const unread = /unread/i.test(card.className) || !!li.querySelector('.notification-badge');
+
+    const timestamp = strings.find((s) => TIME_RE.test(s) || DATE_RE.test(s)) || null;
+    const rest = strings.filter((s) => s !== timestamp);
+    const name = rest[0] || null;
+    const preview = rest.slice(1).filter((s) => !LABEL.test(s)).join(' ') || null;
+
+    // Kept for the day LinkedIn puts a real link back; see the comment above
+    // this block for why both come back null against today's markup.
+    const threadLink = card.querySelector('a[href*="/messaging/thread/"]');
+    const threadMatch = threadLink
+      ? (threadLink.getAttribute('href') || '').match(/\/messaging\/thread\/([^/?#]+)/)
+      : null;
+    const profileLink = card.querySelector('a[href*="/in/"]');
+    const pidMatch = profileLink
+      ? (profileLink.getAttribute('href') || '').match(/\/in\/([^/?#]+)/)
+      : null;
+
+    out.push({
+      name,
+      preview,
+      timestamp,
+      unread,
+      conversation_id: threadMatch ? threadMatch[1] : null,
+      participant_public_id: pidMatch ? pidMatch[1] : null,
+    });
+  }
+  return out;
+}"""
+
+
+async def _read_inbox_rows(page: Any, limit: int) -> list[dict[str, Any]]:
+    try:
+        return await page.evaluate(_INBOX_ROWS_JS, limit) or []
+    except Exception:
+        return []
 
 
 async def _load_more_conversations(page: Any, minimum: int, max_scrolls: int = 6) -> None:
@@ -264,7 +386,37 @@ async def do_get_inbox(
 
         # unread_only filters after loading, so ask for headroom rather than the bare
         # minimum: otherwise a page full of read conversations returns nothing.
-        await _load_more_conversations(page, minimum=cap * 3 if unread_only else cap)
+        headroom = cap * 3 if unread_only else cap
+        await _load_more_conversations(page, minimum=headroom)
+
+        # Structural read first: it's the one that survives LinkedIn shipping a
+        # bare `.msg-conversations-container` that no longer exists anywhere in
+        # the DOM (see _INBOX_ROWS_JS). The selector path below stays as a
+        # fallback in case an account is served an older layout where that
+        # class, and the hrefs the old extractor looked for, are actually there.
+        rows = await _read_inbox_rows(page, headroom)
+        if rows:
+            conversations: list[dict] = []
+            for row in rows:
+                unread = bool(row.get("unread"))
+                if unread_only and not unread:
+                    continue
+                conversations.append(
+                    {
+                        "conversation_id": row.get("conversation_id"),
+                        "participant_name": clean(row.get("name")),
+                        "participant_public_id": row.get("participant_public_id"),
+                        "last_message_preview": fence(
+                            truncate(clean(row.get("preview")), _PREVIEW_LIMIT, "message preview"),
+                            "conversation.preview",
+                        ),
+                        "timestamp": row.get("timestamp"),
+                        "unread": unread,
+                    }
+                )
+                if len(conversations) >= cap:
+                    break
+            return {"conversations": conversations, "count": len(conversations)}
 
         container = await page.query_selector(_CONTAINER_SELECTOR)
         if container is None:
@@ -275,7 +427,7 @@ async def do_get_inbox(
         except Exception:
             raise parse_failed("the conversation list")
 
-        conversations: list[dict] = []
+        conversations = []
         for card in cards:
             convo = await _extract_conversation_card(card)
             if convo is None:
@@ -296,7 +448,24 @@ async def do_get_inbox(
 # ---------------------------------------------------------------------------
 
 _THREAD_CONTAINER_SELECTOR = ".msg-s-message-list-container, .msg-s-message-list"
-_MESSAGE_GROUP_SELECTOR = "li.msg-s-message-list__event, div.msg-s-message-list__event, li.msg-s-event-listitem"
+
+# One "group" here is a run of consecutive messages from the same sender:
+# LinkedIn puts the sender name and timestamp on the group once and lets
+# several message bodies share it, which is why extraction below reads
+# sender/timestamp from the group and then walks every body inside it.
+#
+# `li.msg-s-event-listitem` (below, in the fallback list) never matches
+# anything: `msg-s-event-listitem` is always a class on a <div>, never on an
+# <li>, confirmed against a captured thread. It's left in the fallback list
+# rather than deleted, on the off chance an older cohort's markup differs, but
+# `li.msg-s-message-list__event` is the one that actually finds the group in
+# current markup and is tried alone first: combining it with
+# `div.msg-s-event-listitem` in one query would double-count every message,
+# since the div sits inside the li and both would match as separate "groups".
+_MESSAGE_GROUP_SELECTOR = "li.msg-s-message-list__event"
+_MESSAGE_GROUP_FALLBACK_SELECTOR = (
+    "div.msg-s-event-listitem, div.msg-s-message-list__event, li.msg-s-event-listitem"
+)
 
 _SENDER_SELECTORS = (
     ".msg-s-message-group__name",
@@ -334,6 +503,11 @@ async def do_get_conversation(
 
         try:
             groups = await page.query_selector_all(_MESSAGE_GROUP_SELECTOR)
+            if not groups:
+                # Primary selector is a single, real class (see the comment on
+                # _MESSAGE_GROUP_SELECTOR for why it isn't combined with the
+                # fallback in one query); only reached for an older layout.
+                groups = await page.query_selector_all(_MESSAGE_GROUP_FALLBACK_SELECTOR)
         except Exception:
             raise parse_failed("the message thread")
 
@@ -346,9 +520,16 @@ async def do_get_conversation(
             timestamp = await _first_text(group, _GROUP_TIME_SELECTORS)
 
             try:
+                # Deliberately NOT including `.msg-s-event-listitem__message-bubble`
+                # here: it's an ancestor of `.msg-s-event-listitem__body`, not an
+                # alternative to it, so querying both together returned every
+                # message twice per event (the paragraph and its own ancestor
+                # bubble both matching as separate "body" elements), confirmed
+                # against a captured thread. It's still tried, alone, as the
+                # last-resort fallback a few lines down for message types
+                # (image, voice note) that have no `__body` paragraph at all.
                 bodies = await group.query_selector_all(
-                    ".msg-s-event-listitem__body, p.msg-s-event-listitem__body, "
-                    ".msg-s-event-listitem__message-bubble"
+                    ".msg-s-event-listitem__body, p.msg-s-event-listitem__body"
                 )
             except Exception:
                 bodies = []
@@ -431,14 +612,44 @@ async def do_search_conversations(
         except Exception:
             raise parse_failed("the messaging search results")
 
+        cap = max(1, limit)
+
+        # Same list, same rows, now filtered by LinkedIn to the search term: the
+        # structural reader that do_get_inbox uses applies unchanged. See
+        # _INBOX_ROWS_JS for why conversation_id/participant_public_id are
+        # best-effort against current markup.
+        rows = await _read_inbox_rows(page, cap)
+        if rows:
+            results: list[dict] = []
+            for row in rows[:cap]:
+                snippet = clean(row.get("preview"))
+                results.append(
+                    {
+                        "conversation_id": row.get("conversation_id"),
+                        "participant_name": clean(row.get("name")),
+                        "participant_public_id": row.get("participant_public_id"),
+                        "last_message_preview": fence(
+                            truncate(snippet, _PREVIEW_LIMIT, "message preview"),
+                            "conversation.preview",
+                        ),
+                        "timestamp": row.get("timestamp"),
+                        "unread": bool(row.get("unread")),
+                        "matching_snippet": fence(
+                            truncate(snippet, _SNIPPET_LIMIT, "search snippet"),
+                            "conversation.search_snippet",
+                        ),
+                    }
+                )
+            return {"query": q, "results": results, "count": len(results)}
+
         try:
             cards = await page.query_selector_all(_CARD_SELECTOR)
         except Exception:
             raise parse_failed("the messaging search results")
 
-        results: list[dict] = []
+        results = []
         for card in cards:
-            if len(results) >= max(1, limit):
+            if len(results) >= cap:
                 break
             convo = await _extract_conversation_card(card)
             if convo is None:

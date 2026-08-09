@@ -3,9 +3,37 @@
 LinkedIn's content search is a lazily-loaded feed: results past the first
 screenful only exist in the DOM after scrolling brings them into view, and the
 DOM shape of a "post card" has shifted many times over the life of the site.
-Every field here therefore has more than one selector to try, and every helper
-degrades to `None` instead of raising when a field it's looking for isn't there;
-a missing reaction count should never fail the whole search.
+LinkedIn now also ships hashed, per-build class names (`b0712e9a`, `e3ec3fcb`),
+so the old class-based selector tables below are dead against the live site.
+They stay as a fallback (in case some accounts still get older markup), but
+the primary read is structural, in `_POST_ROWS_JS`, following the same three
+rules `people.py` established:
+
+  - A post row is the smallest ancestor containing a posted-at-shaped string
+    ("1d •", "21h •"): that string is always the last field LinkedIn renders
+    in the actor header before the Follow control, so its appearance is a far
+    more reliable "header is complete" signal than a fixed field count would
+    be — a company post has no separate headline line and would blow straight
+    past a naive count.
+  - Reaction and comment counts are NOT in an aria-label on this page (that
+    was checked against the fixture and is not what's actually there): they
+    are plain text ("5 reactions", "23 comments"), rendered twice for
+    accessibility, and for larger counts LinkedIn splits the number and the
+    word into separate text nodes with no space between them, so the digit
+    ends up directly against the word either way once whitespace is
+    collapsed. That adjacency is what's matched: "contains a digit anywhere
+    and contains the word anywhere" is not the same check and is too loose,
+    proven by a real captured page, where a post's own sentence ("...how to
+    stand out with thoughtful, value-adding comments...") several lines
+    away from an unrelated digit earlier in the same paragraph was
+    misread as a comment count and stolen from the body text.
+  - A quoted/reposted post embedded inside another person's post is a decoy
+    exactly like the ones `messaging.py` rejects: it carries its own author,
+    its own Follow control, its own permalink, and its own body text, all of
+    which would be wrong if attributed to the outer post's author. It is
+    detected the same way: a second "Follow <name>" control appearing after
+    the first marks where the embed begins, and everything gathered for the
+    outer post is bounded to before it.
 
 Post bodies are the one field on this page an attacker fully controls: anyone
 can publish a LinkedIn post whose text is written to look like instructions to
@@ -114,6 +142,241 @@ _UNIT_TO_DAYS = {
     "mo": 30.0,
     "yr": 365.0,
 }
+
+# ---------------------------------------------------------------------------
+# Structural read (primary). See the module docstring for the three rules.
+# What survives a rebuild here: role="listitem" (LinkedIn's own accessibility
+# semantics for "one item in this results list", not a class name), an
+# aria-label naming the actor ("Follow Jill Burns"), and the shape of the
+# text itself. Verified against a real captured /search/results/content/ page.
+# ---------------------------------------------------------------------------
+
+_POST_ROWS_JS = r"""() => {
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+
+  const scope = document.querySelector('main');
+  if (!scope) return [];
+
+  // Each post card is marked role="listitem". Scoping to `main` keeps any
+  // unrelated listitem (nav, filter chips) that isn't part of the results
+  // feed out of consideration.
+  const rows = [...scope.querySelectorAll('div[role="listitem"]')];
+
+  const entityId = (href) => {
+    if (!href) return null;
+    let m = href.match(/\/in\/([^/?#]+)/);
+    if (m) return 'in:' + m[1];
+    m = href.match(/\/company\/([^/?#]+)/);
+    if (m) return 'company:' + m[1];
+    return null;
+  };
+
+  const uniqueEntities = (el) => {
+    const ids = new Set();
+    for (const a of el.querySelectorAll('a[href]')) {
+      const eid = entityId(a.getAttribute('href'));
+      if (eid) ids.add(eid);
+    }
+    return ids;
+  };
+
+  // Same problem _SEARCH_ROWS_JS solves: every label is rendered twice, once
+  // visible and once for screen readers, so textContent gives "Yannic Kilcher
+  // Yannic Kilcher • 2nd...". Walking text nodes and dropping repeats (both
+  // consecutive and anywhere earlier in the list) keeps the fields separate.
+  const rowStrings = (root) => {
+    const out = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walker.nextNode())) {
+      const t = clean(n.nodeValue);
+      if (t && out[out.length - 1] !== t && !out.includes(t)) out.push(t);
+    }
+    return out;
+  };
+
+  const AGE = /^\d+\s*(mo|yr|[smhdw])\s*[•·]?\s*$/i;
+  const DEGREE = /^[•·]?\s*(1st|2nd|3rd\+?)$/i;
+
+  // Climb from the author's own /in/ or /company/ link to the smallest
+  // ancestor whose deduped text already contains a posted-at-shaped string
+  // ("1d •"). That string is always the last header field before the Follow
+  // control, so its appearance means the header is complete — unlike a fixed
+  // string-count threshold, this does not overshoot on a company post, which
+  // has no separate headline line and would otherwise blow straight past a
+  // count-based stop into the post body. Bounded to 8 climbs, and stops
+  // (without climbing in) the moment a parent would swallow a second author,
+  // the same guard _SEARCH_ROWS_JS uses for search result rows.
+  const findHeader = (row) => {
+    let anchor = null;
+    for (const a of row.querySelectorAll('a[href]')) {
+      if (entityId(a.getAttribute('href'))) { anchor = a; break; }
+    }
+    if (!anchor) return null;
+
+    let node = anchor;
+    let strings = [];
+    for (let i = 0; i < 8 && node.parentElement && node.parentElement !== row.parentElement; i++) {
+      const parent = node.parentElement;
+      if (uniqueEntities(parent).size > 1) break;
+      node = parent;
+      strings = rowStrings(node);
+      if (strings.length >= 3 && strings.some((s) => AGE.test(s))) break;
+    }
+    if (!strings.length) return null;
+    return { node, strings };
+  };
+
+  // /company/<slug>/posts/ (no trailing segment) is that company's post-tab
+  // link, not a permalink to this one post: a real permalink always carries
+  // either the activity/ugcPost urn or a slug after /posts/.
+  const isRealPostLink = (href) => {
+    if (!href) return false;
+    if (href.includes('/feed/update/urn:li:')) return true;
+    const m = href.match(/\/posts\/([^/?#]+)/);
+    return !!(m && m[1]);
+  };
+
+  const NOISE = new RegExp(
+    '^(' +
+      'like|comment|repost|send|' +
+      'this is a modal window\\.?|beginning of dialog window.*|end of dialog window\\.?|' +
+      'show results|the author can see how you vote.*|' +
+      '\\d+\\s*votes?|\\d+\\s*(mo|yr|[smhdw])\\s*left|' +
+      '[•·]' +
+    ')$',
+    'i'
+  );
+
+  // A count paragraph has its digit run directly against the word ("5
+  // reactions", "216reactions" once concatenated — see the module
+  // docstring). Requiring that adjacency, rather than "contains a digit
+  // and contains the word anywhere", matters: a long post body easily
+  // contains both separately (a "Week 2" earlier in the paragraph and
+  // "value-adding comments" later in it is a real example from a captured
+  // profile page), and a loose check misreads the post's own words as a
+  // comment count and steals that paragraph away from the real body text.
+  const COUNT_LIKE = /\d[\d,.]*\s*[kKmM]?\+?\s*(reaction|comment|repost)s?/i;
+
+  const out = [];
+  for (const row of rows) {
+    const header = findHeader(row);
+    if (!header) continue;
+    const { node: headerNode, strings } = header;
+
+    // How many distinct actors this row talks about: the primary author,
+    // plus one more per quoted/reposted post embedded in it. Each gets
+    // exactly one Follow control, the same "one identity, one control"
+    // reasoning _FIND_COMPOSE_HREF_JS uses to reject decoy Message links.
+    const followEls = [...row.querySelectorAll('[aria-label]')].filter((el) => {
+      const al = el.getAttribute('aria-label') || '';
+      return al.startsWith('Follow ') || al.startsWith('Following ');
+    });
+
+    let authorName = followEls.length
+      ? clean(followEls[0].getAttribute('aria-label').replace(/^(Follow|Following)\s+/, ''))
+      : null;
+    if (!authorName) authorName = strings[0] || null;
+
+    const degree = strings.find((s) => DEGREE.test(s)) || null;
+    const postedRaw = strings.find((s) => AGE.test(s)) || null;
+    const rest = strings.filter(
+      (s) => s !== authorName && s !== degree && s !== postedRaw && !/^(follow|following)\b/i.test(s)
+    );
+    const headline = rest.length ? rest.reduce((a, b) => (b.length > a.length ? b : a)) : null;
+
+    let authorPublicId = null;
+    for (const a of headerNode.querySelectorAll('a[href]')) {
+      const m = (a.getAttribute('href') || '').match(/\/in\/([^/?#]+)/);
+      if (m) { authorPublicId = m[1]; break; }
+    }
+
+    // A second Follow control marks where a quoted/reposted post's own
+    // header begins. Its permalink and body text both come after that
+    // control in document order; everything below is bounded to before it
+    // so the embed's author and words never get attributed to this row's
+    // actual author.
+    const cutoff = followEls.length > 1 ? followEls[1] : null;
+    const isBefore = (el) => !cutoff || !!(el.compareDocumentPosition(cutoff) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+    const headerPs = new Set(headerNode.querySelectorAll('p'));
+    let text = null;
+    for (const p of row.querySelectorAll('p')) {
+      if (headerPs.has(p) || !isBefore(p)) continue;
+      const t = clean(p.textContent);
+      if (!t || NOISE.test(t) || COUNT_LIKE.test(t)) continue;
+      if (!text || t.length > text.length) text = t;
+    }
+
+    let reactionText = null;
+    let commentText = null;
+    for (const p of row.querySelectorAll('p')) {
+      const t = clean(p.textContent);
+      if (!COUNT_LIKE.test(t)) continue;
+      if (!reactionText && /reaction/i.test(t)) reactionText = t;
+      if (!commentText && /comment/i.test(t)) commentText = t;
+      if (reactionText && commentText) break;
+    }
+
+    let postUrl = null;
+    for (const a of row.querySelectorAll('a[href]')) {
+      const href = a.getAttribute('href') || '';
+      if (isRealPostLink(href) && isBefore(a)) {
+        postUrl = href.split('?')[0];
+        break;
+      }
+    }
+
+    if (!authorName && !text) continue;
+    out.push({
+      author_name: authorName,
+      author_headline: headline,
+      author_public_id: authorPublicId,
+      posted_at_raw: postedRaw,
+      reaction_text: reactionText,
+      comment_text: commentText,
+      post_url: postUrl,
+      text: text,
+    });
+  }
+  return out;
+}"""
+
+
+async def _read_structural_post_rows(page: Any) -> list[dict[str, Any]]:
+    try:
+        return await page.evaluate(_POST_ROWS_JS) or []
+    except Exception:
+        return []
+
+
+def _finalize_structural_post(raw: dict[str, Any]) -> dict[str, Any] | None:
+    author_name = (raw.get("author_name") or "").strip() or None
+    text = (raw.get("text") or "").strip() or None
+    if not author_name and not text:
+        # Neither an actor nor a body: not a post this server failed to
+        # read, almost certainly a module that only looked like one.
+        return None
+
+    return {
+        "author_name": author_name,
+        "author_headline": (raw.get("author_headline") or "").strip() or None,
+        "author_public_id": raw.get("author_public_id") or None,
+        "posted_at": _clean_posted_at(raw.get("posted_at_raw")),
+        "reaction_count": _parse_count(raw.get("reaction_text")),
+        "comment_count": _parse_count(raw.get("comment_text")),
+        "post_url": raw.get("post_url") or None,
+        "text": fence(safety_truncate(text, _POST_TEXT_LIMIT, "post text"), "post.text"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Selector-based read (fallback). Reached only when the structural read above
+# finds no role="listitem" rows at all, e.g. an account served an older
+# layout. See the module docstring: LinkedIn's per-build class hashing means
+# every selector below is expected to be dead against the current site.
+# ---------------------------------------------------------------------------
+
 
 async def _first_text(item: Any, selectors: tuple[str, ...]) -> str | None:
     for sel in selectors:
@@ -287,6 +550,22 @@ def _explain_stop(stop_reason: str | None, found: int, limit: int) -> str:
     return f"Found {found} of the requested {limit} posts."
 
 
+def _consider(
+    matched: list[dict[str, Any]],
+    record: dict[str, Any] | None,
+    posted_within_days: int | None,
+) -> None:
+    if record is None:
+        return
+    if posted_within_days is not None:
+        age_days = _parse_age_days(record["posted_at"])
+        # An age we can't parse is kept rather than dropped: an unrecognised
+        # time format is not evidence the post is old.
+        if age_days is not None and age_days > posted_within_days:
+            return
+    matched.append(record)
+
+
 async def _collect_results(
     page: Any, limit: int, posted_within_days: int | None
 ) -> tuple[list[dict[str, Any]], bool, str | None]:
@@ -294,21 +573,30 @@ async def _collect_results(
     processed_count = 0
     prev_total = -1
     stop_reason: str | None = None
+    # Decided once, from the first read, and held for the rest of this call:
+    # LinkedIn either ships the role="listitem" markup this account is
+    # seeing or it doesn't, and switching source mid-scroll would track two
+    # independently-growing lists against one `processed_count`, double
+    # counting or skipping rows.
+    structural_mode: bool | None = None
 
     for attempt in range(_MAX_SCROLL_ATTEMPTS + 1):
-        items = await _find_result_items(page)
-        total = len(items)
+        if structural_mode is None or structural_mode:
+            raw_rows = await _read_structural_post_rows(page)
+            if structural_mode is None:
+                structural_mode = bool(raw_rows)
 
-        for item in items[processed_count:]:
-            record = await _extract_post(item)
-            if record is not None:
-                if posted_within_days is not None:
-                    age_days = _parse_age_days(record["posted_at"])
-                    # An age we can't parse is kept rather than dropped: an
-                    # unrecognised time format is not evidence the post is old.
-                    if age_days is not None and age_days > posted_within_days:
-                        continue
-                matched.append(record)
+        if structural_mode:
+            total = len(raw_rows)
+            for raw in raw_rows[processed_count:]:
+                _consider(matched, _finalize_structural_post(raw), posted_within_days)
+                if len(matched) >= limit:
+                    break
+        else:
+            items = await _find_result_items(page)
+            total = len(items)
+            for item in items[processed_count:]:
+                _consider(matched, await _extract_post(item), posted_within_days)
                 if len(matched) >= limit:
                     break
         processed_count = total
@@ -333,9 +621,13 @@ async def _collect_results(
 async def _search_posts(
     session: Session, keywords: str, limit: int, posted_within_days: int | None
 ) -> dict[str, Any]:
+    # The old wait target (div.search-results-container, a class-based
+    # selector) is dead against the current site; "main" is what people.py's
+    # search waits on too, and _collect_results does its own structural wait
+    # via role="listitem" on the first read.
     page = await session.goto(
         f"/search/results/content/?keywords={quote_plus(keywords)}",
-        wait_for="div.search-results-container, ul.reusable-search__entity-result-list",
+        wait_for="main",
     )
 
     try:
