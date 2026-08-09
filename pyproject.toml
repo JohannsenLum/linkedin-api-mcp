@@ -1,6 +1,6 @@
 [project]
 name = "linkedin-api-mcp"
-version = "0.0.3"
+version = "0.0.4"
 description = "MCP server for LinkedIn: read profiles, companies, jobs and messages through your own logged-in browser session"
 readme = "README.md"
 requires-python = ">=3.11"

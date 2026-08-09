@@ -480,7 +480,7 @@ _DETAILS_JS = r"""() => {
     // a dash or the word Present. Everything before it is title and organisation;
     // anything after is location and description.
     const dateIdx = fields.findIndex(f =>
-      /\b(19|20)\d{2}\b/.test(f) && (/[-–, ]|Present|\bto\b/i.test(f)));
+      /\b(19|20)\d{2}\b/.test(f) && (/[-\u2013\u2014]|Present|\bto\b/i.test(f)));
     const dates = dateIdx >= 0 ? fields[dateIdx] : null;
     const head = dateIdx >= 0 ? fields.slice(0, dateIdx) : fields.slice(0, 2);
     const tail = dateIdx >= 0 ? fields.slice(dateIdx + 1) : [];

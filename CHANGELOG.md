@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.0.4] - 2026-08-10
+
+### Fixed
+
+- **`experience` and `education` are no longer empty.** The assumption was that
+  they lazy-load on scroll. That was wrong: scrolling six screens leaves the page
+  text byte-identical. They are not on the profile page at all. They live at
+  `/in/<id>/details/experience/` and `/details/education/`, fully rendered, and one
+  navigation gets the lot.
+
+  Entries are found with the same rule as search results: an entry is the smallest
+  ancestor holding exactly one company or school link. The date range is the field
+  with a recognisable shape, a year plus a dash or "Present", so what precedes it
+  is title and organisation and what follows is location and description.
+
+  Education is labelled separately because LinkedIn lists the school first and the
+  qualification second, the reverse of experience. Naming by position would have
+  silently swapped them.
+
+  Verified live: four roles with dates and locations, two schools with degrees.
+  Costs one extra navigation per section, so the caller asks for them rather than
+  paying for them by default.
+
+### Added
+
+- One-click install buttons for Claude Code, Claude Desktop, Cursor, VS Code, Zed,
+  Windsurf and Codex CLI. The Cursor and VS Code deeplink payloads were decoded and
+  checked to produce exactly `uvx linkedin-api-mcp`, since a malformed one silently
+  installs a broken server.
+- An animated terminal header showing a people search, then a message being sent
+  and confirmed by reading the thread back.
+
 ## [0.0.3] - 2026-08-10
 
 The first version whose parsers have actually been run against LinkedIn.
