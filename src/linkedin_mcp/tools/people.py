@@ -429,6 +429,109 @@ async def _read_search_rows(page: Any, limit: int) -> list[dict[str, Any]]:
         return []
 
 
+# Experience and education are NOT lazy-loaded on the profile page, which is what
+# the earlier "scroll to reveal them" theory assumed. Scrolling changes nothing:
+# the page text stays byte-identical. They live at their own routes,
+# /in/<id>/details/experience/ and /details/education/, fully rendered.
+#
+# One extra navigation per section, so the caller asks for them rather than paying
+# the cost by default.
+_DETAILS_JS = r"""() => {
+  const clean = t => (t || '').replace(/\s+/g, ' ').trim();
+  const main = document.querySelector('main');
+  if (!main) return [];
+
+  // Each entry links to the company or school it belongs to, so the row rule that
+  // worked for search applies here: an entry is the smallest ancestor holding
+  // exactly one such link. Anything with no link at all (the page heading, the
+  // footer chrome) falls out naturally.
+  const ENTITY = 'a[href*="/company/"], a[href*="/school/"]';
+  const NOISE = /^(Experience|Education|Profile language|Ad Options|English|Show all|·|,)$/i;
+
+  const rowText = (root) => {
+    const out = [];
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = w.nextNode())) {
+      const t = clean(n.nodeValue);
+      if (t && !out.includes(t) && !NOISE.test(t)) out.push(t);
+    }
+    return out;
+  };
+
+  const seen = new Set();
+  const out = [];
+
+  for (const a of main.querySelectorAll(ENTITY)) {
+    let row = a;
+    for (let i = 0; i < 8 && row.parentElement && row.parentElement !== main; i++) {
+      const p = row.parentElement;
+      if (p.querySelectorAll(ENTITY).length > 1) break;
+      row = p;
+    }
+    const fields = rowText(row);
+    if (fields.length < 2) continue;
+
+    const key = fields.slice(0, 3).join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    // A date range is the one field with a recognisable shape: a year, and either
+    // a dash or the word Present. Everything before it is title and organisation;
+    // anything after is location and description.
+    const dateIdx = fields.findIndex(f =>
+      /\b(19|20)\d{2}\b/.test(f) && (/[-–, ]|Present|\bto\b/i.test(f)));
+    const dates = dateIdx >= 0 ? fields[dateIdx] : null;
+    const head = dateIdx >= 0 ? fields.slice(0, dateIdx) : fields.slice(0, 2);
+    const tail = dateIdx >= 0 ? fields.slice(dateIdx + 1) : [];
+
+    out.push({
+      title: head[0] || null,
+      organisation: head[1] || null,
+      dates: dates,
+      location: tail.find(t => t.length < 60 && /,|\b(Singapore|Remote|Hybrid|On-site)\b/.test(t)) || null,
+      description: tail.filter(t => t.length >= 60).join(' ') || null,
+      url: a.getAttribute('href') ? a.getAttribute('href').split('?')[0] : null,
+    });
+  }
+  return out;
+}"""
+
+
+async def _read_details(session: Any, pid: str, kind: str) -> list[dict[str, Any]]:
+    """Read one profile detail section. Returns [] rather than raising: a member
+    with no education listed is a normal profile, not a parse failure."""
+    try:
+        page = await session.goto(f"/in/{pid}/details/{kind}/", wait_for="main")
+        rows = await page.evaluate(_DETAILS_JS) or []
+    except LinkedInError:
+        raise
+    except Exception:
+        return []
+
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        if kind == "education":
+            # LinkedIn lists the school first and the qualification second, the
+            # reverse of experience. Naming them by position would be wrong.
+            out.append({
+                "school": clean(r.get("title")),
+                "degree": clean(r.get("organisation")),
+                "dates": clean(r.get("dates")),
+                "url": r.get("url"),
+            })
+        else:
+            out.append({
+                "title": clean(r.get("title")),
+                "organisation": clean(r.get("organisation")),
+                "dates": clean(r.get("dates")),
+                "location": clean(r.get("location")),
+                "description": fence(clean(r.get("description")), f"{kind}.description"),
+                "url": r.get("url"),
+            })
+    return out
+
+
 async def _read_top_card(page: Any) -> dict[str, Any]:
     try:
         return await page.evaluate(_TOP_CARD_JS) or {}
@@ -645,8 +748,14 @@ async def _scrape_profile(
     # on this same page load whether or not "experience" was requested, so
     # fetching one entry here is free, it's only the full list (up to
     # _SECTION_LIMITS["experience"]) that's gated behind the section flag.
+    # Detail sections come from their own routes. Try that first; the old in-page
+    # extractor stays as a fallback for accounts served the older layout.
     experience_cap = _SECTION_LIMITS["experience"] if "experience" in sections else 1
-    experience = await _extract_experience(page, experience_cap)
+    experience = []
+    if "experience" in sections:
+        experience = (await _read_details(session, pid, "experience"))[:experience_cap]
+    if not experience:
+        experience = await _extract_experience(page, experience_cap)
     current_position = experience[0] if experience else None
 
     result: dict[str, Any] = {
@@ -665,7 +774,8 @@ async def _scrape_profile(
     if "experience" in sections:
         result["experience"] = experience
     if "education" in sections:
-        result["education"] = await _extract_education(page, _SECTION_LIMITS["education"])
+        education = (await _read_details(session, pid, "education"))[:_SECTION_LIMITS["education"]]
+        result["education"] = education or await _extract_education(page, _SECTION_LIMITS["education"])
     if "skills" in sections:
         result["skills"] = await _extract_skills(page, _SECTION_LIMITS["skills"])
     if "certifications" in sections:
