@@ -1,6 +1,6 @@
 name: Notify Telegram (Activity)
 
-# Growth and release signals — the things that tell you the project is being used
+# Growth and release signals: the things that tell you the project is being used
 # rather than worked on. Kept separate from the PR/Review/Issue topics because
 # these need no response: they are a record, not a queue.
 #
@@ -12,7 +12,7 @@ name: Notify Telegram (Activity)
 # without opening GitHub.
 #
 # SECURITY: no checkout, no PR code, `permissions: {}`. Untrusted values go
-# through `env:` and are HTML-escaped in python — never interpolated into `run:`.
+# through `env:` and are HTML-escaped in python, never interpolated into `run:`.
 
 on:
   fork:
@@ -27,7 +27,7 @@ jobs:
   telegram:
     runs-on: ubuntu-latest
     # Bots don't star or fork meaningfully, and a bot-published release is still
-    # worth hearing about — so only the obviously-noisy case is filtered.
+    # worth hearing about, so only the obviously-noisy case is filtered.
     if: github.event_name != 'watch' || github.event.sender.type != 'Bot'
     steps:
       - name: Send Telegram message
@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
 
           if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
-            echo "Telegram secrets not set — skipping."
+            echo "Telegram secrets not set, skipping."
             exit 0
           fi
 

@@ -54,7 +54,7 @@ jobs:
         run: uv build
 
       # The failure mode this guards against is "works from source, broken once
-      # installed" — the console script is how every user starts the server, and
+      # installed": the console script is how every user starts the server, and
       # an entry point that only exists in the checkout is invisible until
       # someone pip-installs and gets `command not found`.
       - name: Verify the console script is declared in the wheel
@@ -73,13 +73,13 @@ jobs:
           PY
 
       - name: Publish to PyPI
-        # Pinned to the exact commit behind v1.14.2 rather than a movable tag —
+        # Pinned to the exact commit behind v1.14.2 rather than a movable tag:
         # a tag can be repointed, a commit SHA cannot.
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           verbose: true
           # PyPI refuses to overwrite an existing version, so a re-run of this
-          # workflow — to retry the registry step, say — would otherwise fail on
+          # workflow (to retry the registry step, say) would otherwise fail on
           # a publish that already succeeded. Skip instead, and let the registry
           # job proceed.
           skip-existing: true

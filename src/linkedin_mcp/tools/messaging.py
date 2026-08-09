@@ -1,7 +1,7 @@
 """Inbox and conversations: read the messaging surface, and the two write actions
 that go with it (sending a message, sending a connection request).
 
-This is the highest-risk *reading* surface in the server — unlike a profile's
+This is the highest-risk *reading* surface in the server: unlike a profile's
 "About" section, which the profile owner wrote about themselves, a message body
 is text chosen by whoever is on the other end of the conversation, addressed
 directly at "the reader". Every message body, message preview, and search
@@ -12,7 +12,7 @@ full threat model.
 
 It is also the module with the most write tools (`do_send_message`,
 `do_connect`), so the refusal paths (empty message, ambiguous target, note too
-long, invitation limit) matter as much as the happy path — a write tool that
+long, invitation limit) matter as much as the happy path: a write tool that
 guesses instead of refusing is how a message goes to the wrong person.
 """
 
@@ -27,15 +27,15 @@ from ..session import Session
 from ..throttle import ActionQueue, RateLimited
 
 # LinkedIn does not publish an exact compose-box character cap. This is a
-# conservative estimate — refusing a little early beats truncating a message
+# conservative estimate: refusing a little early beats truncating a message
 # silently and sending half of it.
 MAX_MESSAGE_CHARS = 8000
 
 # LinkedIn's documented cap on connection-request notes for free accounts.
 MAX_NOTE_CHARS = 300
 
-# How much of each free-text field we keep before handing it to fence() —
-# see safety.truncate(): never silent, always a visible marker.
+# How much of each free-text field we keep before handing it to fence().
+# See safety.truncate(): never silent, always a visible marker.
 _PREVIEW_LIMIT = 500
 _BODY_LIMIT = 6000
 _SNIPPET_LIMIT = 500
@@ -67,7 +67,7 @@ async def _run_tool(queue: ActionQueue, label: str, fn: Any) -> dict:
     except LinkedInError as exc:
         return exc.as_dict()
     except RateLimited as exc:
-        # Built from the exception's own typed fields rather than str(exc) —
+        # Built from the exception's own typed fields rather than str(exc):
         # RateLimited's message happens to be safe too, but this keeps rule 2
         # ("never interpolate a caught exception into a message") literal.
         mins = max(1, round(exc.retry_after_s / 60))
@@ -192,7 +192,7 @@ _UNREAD_BADGE_SELECTORS = (
 async def _load_more_conversations(page: Any, minimum: int, max_scrolls: int = 6) -> None:
     """Best-effort: LinkedIn lazy-loads older conversations as the list is scrolled, so the
     ~20 that render on first paint are all a plain query would ever see. Bounded and
-    exception-safe throughout — a scroll that doesn't work just means fewer results
+    exception-safe throughout: a scroll that doesn't work just means fewer results
     back, never a tool failure.
     """
     for _ in range(max_scrolls):
@@ -243,7 +243,7 @@ async def _extract_conversation_card(card: Any) -> dict | None:
         pass
 
     if name is None and preview is None and conversation_id is None:
-        return None  # this element matched a selector but not our expected shape — skip it
+        return None  # this element matched a selector but not our expected shape: skip it
 
     return {
         "conversation_id": conversation_id,
@@ -263,7 +263,7 @@ async def do_get_inbox(
         page = await session.goto("/messaging/", wait_for=_CONTAINER_SELECTOR)
 
         # unread_only filters after loading, so ask for headroom rather than the bare
-        # minimum — otherwise a page full of read conversations returns nothing.
+        # minimum: otherwise a page full of read conversations returns nothing.
         await _load_more_conversations(page, minimum=cap * 3 if unread_only else cap)
 
         container = await page.query_selector(_CONTAINER_SELECTOR)
@@ -327,7 +327,7 @@ async def do_get_conversation(
             f"/messaging/thread/{cid}/",
             wait_for=f"{_THREAD_CONTAINER_SELECTOR}, {_MESSAGE_GROUP_SELECTOR}",
         )
-        # An unknown or expired thread id lands back on the inbox rather than 404ing —
+        # An unknown or expired thread id lands back on the inbox rather than 404ing:
         # the thread id missing from the landed URL is the only reliable signal.
         if f"/messaging/thread/{cid}" not in page.url:
             raise not_found("This conversation")
@@ -425,7 +425,7 @@ async def do_search_conversations(
             await search_box.click()
             await search_box.fill(q)
             # Results re-render asynchronously with no dedicated selector to wait on
-            # (it's the same conversation-card markup, just filtered) — a short fixed
+            # (it's the same conversation-card markup, just filtered), a short fixed
             # wait for the debounce is the least brittle option here.
             await page.wait_for_timeout(800)
         except Exception:
@@ -580,7 +580,7 @@ async def do_send_message(
                 "invalid_argument",
                 f"The message is {len(text)} characters, over the {MAX_MESSAGE_CHARS}-character "
                 "limit this server enforces.",
-                "Shorten the message and try again — it will not be sent truncated.",
+                "Shorten the message and try again. It will not be sent truncated.",
             )
 
         cid = (conversation_id or "").strip() or None
@@ -660,7 +660,7 @@ _WEEKLY_LIMIT_SELECTORS = (
 
 async def _connect_via_more_menu(page: Any) -> Any:
     """Several profile layouts tuck Connect inside the 'More actions' overflow menu
-    instead of showing it as a primary button — this is the fallback path for those.
+    instead of showing it as a primary button: this is the fallback path for those.
     """
     more_btn = await _query_first(page, _MORE_ACTIONS_SELECTORS)
     if more_btn is None:
@@ -685,7 +685,7 @@ async def do_connect(
                 "invalid_argument",
                 f"The note is {len(clean_note)} characters, over LinkedIn's "
                 f"{MAX_NOTE_CHARS}-character cap for connection notes on free accounts.",
-                "Shorten the note and try again — it will not be sent truncated.",
+                "Shorten the note and try again. It will not be sent truncated.",
             )
 
         page = await session.goto(f"/in/{who}/", wait_for="main")
@@ -696,7 +696,7 @@ async def do_connect(
             raise LinkedInError(
                 "already_connected",
                 "You are already connected to this person.",
-                "No action taken — nothing to send.",
+                "No action taken: nothing to send.",
             )
 
         connect_btn = await _query_first(page, _CONNECT_BUTTON_SELECTORS)
@@ -715,7 +715,7 @@ async def do_connect(
             raise LinkedInError(
                 "already_connected",
                 "You are already connected to this person.",
-                "No action taken — nothing to send.",
+                "No action taken: nothing to send.",
             )
 
         if connect_btn is None:
@@ -755,7 +755,7 @@ async def do_connect(
         if send_btn is None:
             # Some layouts send the invite the instant Connect is clicked, with no
             # modal at all. Only treat this as success if there's a concrete sign the
-            # invite actually went out — otherwise it's a real parse failure.
+            # invite actually went out: otherwise it's a real parse failure.
             if (await _query_first(page, _PENDING_INDICATOR_SELECTORS)) is not None:
                 return {"sent": True, "profile": who, "note_included": False}
             raise parse_failed("the send-invite button")
@@ -775,7 +775,7 @@ async def do_connect(
             raise LinkedInError(
                 "invite_limit_reached",
                 "LinkedIn's weekly invitation limit has been reached.",
-                "This is LinkedIn's own cap, not this server's — it resets on a rolling "
+                "This is LinkedIn's own cap, not this server's: it resets on a rolling "
                 "weekly basis. Wait before sending more invitations.",
             )
 

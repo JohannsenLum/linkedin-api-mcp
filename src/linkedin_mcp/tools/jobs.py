@@ -3,7 +3,7 @@
 LinkedIn encodes `/jobs/search/` filters as opaque query codes it documents
 nowhere public. The mapping below was reverse-engineered from the URLs the
 LinkedIn UI itself produces when you click its filter chips, and LinkedIn is
-free to change it without notice — treat these as best-effort, not contract.
+free to change it without notice: treat these as best-effort, not contract.
 
     f_WT   Workplace type. 1 = On-site, 2 = Remote, 3 = Hybrid. Comma-separated
            for "any of". We map `remote=True` -> "2" (remote only) and
@@ -12,7 +12,7 @@ free to change it without notice — treat these as best-effort, not contract.
 
     f_TPR  Time posted range, formatted "r<seconds-ago>". e.g. "r86400" is the
            last 24 hours. We convert `posted_within_days` to seconds by
-           multiplying by 86400 — LinkedIn accepts any integer here, it does
+           multiplying by 86400: LinkedIn accepts any integer here, it does
            not have to land on one of the preset chip values (24h/week/month).
 
     f_E    Experience level, single digit, comma-separated for "any of":
@@ -37,7 +37,7 @@ _PROBE_TIMEOUT_MS = 3000
 
 # Job descriptions can run long (multi-paragraph postings); cap and mark the
 # cut visibly rather than shipping an unbounded amount of someone else's text
-# straight into the model's context — same reasoning as people.py's limits.
+# straight into the model's context: same reasoning as people.py's limits.
 _DESCRIPTION_LIMIT = 4000
 
 _EXPERIENCE_CODES = {
@@ -77,14 +77,14 @@ async def _guarded(queue: ActionQueue, label: str, fn) -> dict:
     Centralised here so the two public tools below stay a straight line of
     scraping logic instead of each carrying its own try/except. A bare
     `Exception` is treated as "the page changed shape" (parse_failed) rather
-    than re-raised — tools never raise into the transport.
+    than re-raised: tools never raise into the transport.
     """
     try:
         return await queue.run(label, fn)
     except LinkedInError as exc:
         return exc.as_dict()
     except RateLimited as exc:
-        # Built from the exception's own typed fields, never str(exc) — keeps
+        # Built from the exception's own typed fields, never str(exc): keeps
         # the "never interpolate a caught exception" rule literal everywhere,
         # even though RateLimited's own message happens to carry no secrets.
         mins = max(1, round(exc.retry_after_s / 60))
@@ -387,7 +387,7 @@ async def do_get_job(session: Session, queue: ActionQueue, job_id: str) -> dict:
         # Location, posting age and applicant count are usually rendered as one
         # bullet-separated line rather than as separate elements, so pull the
         # whole line and split it instead of relying on it having its own
-        # selector — that line's markup is some of the most volatile on the page.
+        # selector: that line's markup is some of the most volatile on the page.
         meta_line = await _first_text(
             page,
             [

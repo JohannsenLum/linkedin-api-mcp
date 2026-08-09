@@ -5,7 +5,7 @@ happen there, and both exist because the account at risk is the user's real one:
 
   1. Calls are SERIALISED. One browser, one page, one action at a time. An agent
      that fires eight profile lookups in parallel would otherwise drive the same
-     page eight ways at once — which breaks the scrape and looks exactly like
+     page eight ways at once, which breaks the scrape and looks exactly like
      the automated traffic LinkedIn watches for.
 
   2. Calls are PACED, with a floor between actions and a ceiling per hour. An
@@ -37,7 +37,7 @@ class RateLimited(RuntimeError):
             f"Rate limit reached: {used} LinkedIn actions in the last hour "
             f"(ceiling {ceiling}). The next slot frees up in about {mins} minute"
             f"{'s' if mins != 1 else ''}.\n\n"
-            "This limit is local to this server, not LinkedIn's — it exists so an "
+            "This limit is local to this server, not LinkedIn's: it exists so an "
             "agent in a loop cannot get your account restricted. Stop issuing "
             "LinkedIn tool calls and tell the user what happened rather than retrying."
         )

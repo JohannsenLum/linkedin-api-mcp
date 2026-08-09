@@ -5,8 +5,8 @@ irreversible action on the user's real LinkedIn account, so their refusal
 paths matter as much as their happy paths: a write tool that guesses
 instead of refusing is how a message goes to the wrong person.
 
-Every case here uses GuardedSession, which raises if `goto` is ever called
-— proving these refusals happen from input validation alone, before any
+Every case here uses GuardedSession, which raises if `goto` is ever called,
+proving these refusals happen from input validation alone, before any
 navigation, let alone a browser click.
 """
 
@@ -96,7 +96,7 @@ async def test_send_message_refuses_oversized_message() -> None:
 @pytest.mark.asyncio
 async def test_send_message_refuses_malformed_conversation_id() -> None:
     """A conversation_id containing a slash or whitespace is refused rather
-    than blindly built into a navigation path — see _CONVO_ID_INVALID."""
+    than blindly built into a navigation path: see _CONVO_ID_INVALID."""
     session = GuardedSession()
     queue = make_queue()
 

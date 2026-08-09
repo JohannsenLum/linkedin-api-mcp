@@ -1,6 +1,6 @@
 """Regression test: every do_* tool implementation in tools/* must actually
 be registered on the FastMCP instance. A tool implemented but never wired
-up is invisible to callers — this has bitten this project before, so it is
+up is invisible to callers. This has bitten this project before, so it is
 pinned here rather than left to manual inspection.
 """
 

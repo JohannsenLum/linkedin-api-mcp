@@ -3,7 +3,7 @@
 The only credential this server holds is a LinkedIn session cookie (`li_at`).
 That cookie IS the account: anyone holding it is logged in as you, it does not
 expire when you change your password, and LinkedIn does not surface a way to see
-which sessions are active. It is treated accordingly — kept in the OS keyring by
+which sessions are active. It is treated accordingly: kept in the OS keyring by
 default, never written to a log, and never returned by a tool.
 """
 
@@ -60,7 +60,7 @@ def store_cookie(cookie: str) -> str:
         # Report the failure class, not str(exc): some keyring backends embed
         # the account/service lookup (and therefore, indirectly, details of
         # what was being stored) in their exception text. Never interpolate a
-        # caught exception into a message — same rule as errors.py.
+        # caught exception into a message: same rule as errors.py.
         raise ConfigError(
             f"Could not write to the OS keyring ({type(exc).__name__}). "
             "Set LINKEDIN_COOKIE in the environment instead."
@@ -72,7 +72,7 @@ class Config:
     cookie: str
     headless: bool = True
     # Minimum seconds between browser actions. This is the main defence against
-    # an agent looping and hammering LinkedIn from your account — see queue.py.
+    # an agent looping and hammering LinkedIn from your account. See queue.py.
     min_action_interval: float = 2.0
     # Hard ceiling on actions per rolling hour, again per-account.
     max_actions_per_hour: int = 120

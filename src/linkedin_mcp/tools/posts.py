@@ -1,13 +1,13 @@
 """Post search: /search/results/content/.
 
-LinkedIn's content search is a lazily-loaded feed — results past the first
+LinkedIn's content search is a lazily-loaded feed: results past the first
 screenful only exist in the DOM after scrolling brings them into view, and the
 DOM shape of a "post card" has shifted many times over the life of the site.
 Every field here therefore has more than one selector to try, and every helper
 degrades to `None` instead of raising when a field it's looking for isn't there;
 a missing reaction count should never fail the whole search.
 
-Post bodies are the one field on this page an attacker fully controls — anyone
+Post bodies are the one field on this page an attacker fully controls: anyone
 can publish a LinkedIn post whose text is written to look like instructions to
 whatever eventually reads these results. `_fence` wraps that text in an inert,
 clearly-labelled block before it leaves this module; nothing here ever returns
@@ -29,7 +29,7 @@ from ..throttle import ActionQueue, RateLimited
 _TOOL_NAME = "search_posts"
 
 # Hard ceiling on how many posts a single call will chase, independent of the
-# scroll cap below — a caller passing an unreasonable limit shouldn't be able
+# scroll cap below: a caller passing an unreasonable limit shouldn't be able
 # to turn a bounded scroll loop into an unbounded one via a huge number instead.
 _MAX_LIMIT = 50
 
@@ -41,7 +41,7 @@ _MAX_SCROLL_ATTEMPTS = 20
 _SCROLL_WAIT_MS = 1200
 
 # Same reasoning as people.py's _POST_TEXT_LIMIT: never hand a model an
-# unbounded amount of text a stranger authored — cap it and mark the cut
+# unbounded amount of text a stranger authored: cap it and mark the cut
 # visibly rather than silently.
 _POST_TEXT_LIMIT = 1500
 
@@ -171,8 +171,8 @@ def _parse_count(text: str | None) -> int | None:
 def _clean_posted_at(text: str | None) -> str | None:
     if not text:
         return None
-    # The actor sub-description often bundles "<age> • Edited • <visibility>" —
-    # keep just the leading relative-time token rather than the whole string.
+    # The actor sub-description often bundles "<age> • Edited • <visibility>".
+    # Keep just the leading relative-time token rather than the whole string.
     m = _AGE_RE.search(text)
     return m.group(0) if m else text.strip() or None
 
@@ -220,7 +220,7 @@ async def _extract_post_url(item: Any) -> str | None:
 
     href = await _first_attr(item, _POST_LINK_SELECTORS, "href")
     if href:
-        # Strip tracking query params — the bare path is a stable permalink.
+        # Strip tracking query params: the bare path is a stable permalink.
         return href.split("?", 1)[0]
     return None
 
@@ -249,7 +249,7 @@ async def _extract_post(item: Any) -> dict[str, Any] | None:
     if not author_name and not post_text:
         # Neither an actor nor a body means this card almost certainly isn't a
         # post at all (a promoted module, a "people also viewed" strip, etc.)
-        # rather than a post this server failed to read — drop it silently.
+        # rather than a post this server failed to read. Drop it silently.
         return None
 
     return {
@@ -265,7 +265,7 @@ async def _extract_post(item: Any) -> dict[str, Any] | None:
 
 
 async def _scroll(page: Any) -> None:
-    # The results list itself doesn't scroll independently — the window does.
+    # The results list itself doesn't scroll independently: the window does.
     await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
     # Give the lazy-load fetch + render time to land before the next read.
     await page.wait_for_timeout(_SCROLL_WAIT_MS)
@@ -276,12 +276,12 @@ def _explain_stop(stop_reason: str | None, found: int, limit: int) -> str:
         return (
             f"Found {found} of the requested {limit} posts before hitting the "
             f"{_MAX_SCROLL_ATTEMPTS}-scroll safety cap. This cap exists so a "
-            "broad query can't make the server scroll LinkedIn indefinitely — "
+            "broad query can't make the server scroll LinkedIn indefinitely: "
             "try a narrower search, a smaller limit, or accept this result set."
         )
     if stop_reason == "no_more_results":
         return (
-            f"Found {found} of the requested {limit} posts — LinkedIn had no "
+            f"Found {found} of the requested {limit} posts: LinkedIn had no "
             "further results to lazily load for this search."
         )
     return f"Found {found} of the requested {limit} posts."
@@ -304,7 +304,7 @@ async def _collect_results(
             if record is not None:
                 if posted_within_days is not None:
                     age_days = _parse_age_days(record["posted_at"])
-                    # An age we can't parse is kept rather than dropped — an
+                    # An age we can't parse is kept rather than dropped: an
                     # unrecognised time format is not evidence the post is old.
                     if age_days is not None and age_days > posted_within_days:
                         continue
@@ -316,7 +316,7 @@ async def _collect_results(
         if len(matched) >= limit:
             break
         if total == prev_total:
-            # The last scroll surfaced nothing new — we've reached the end of
+            # The last scroll surfaced nothing new: we've reached the end of
             # what LinkedIn will lazily load for this query.
             stop_reason = "no_more_results"
             break
@@ -344,7 +344,7 @@ async def _search_posts(
         raise
     except Exception:
         # The page loaded (goto didn't detect a login/checkpoint redirect) but
-        # something below broke in an unexpected way — LinkedIn's markup is the
+        # something below broke in an unexpected way: LinkedIn's markup is the
         # likely cause, not the caller, so this is a server bug, not a refusal.
         raise parse_failed("post search results")
 
@@ -394,7 +394,7 @@ async def do_search_posts(
     except LinkedInError as exc:
         return exc.as_dict()
     except RateLimited as exc:
-        # Built from the exception's own typed fields, not its rendered text —
+        # Built from the exception's own typed fields, not its rendered text:
         # str(exc) is safe here too (no cookie/URL in it) but this keeps the
         # rule literal: never interpolate a caught exception into a message.
         mins = max(1, round(exc.retry_after_s / 60))

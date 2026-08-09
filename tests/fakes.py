@@ -6,13 +6,13 @@ small, fixed subset of Playwright's Page / ElementHandle / Locator surface
 (query_selector*, locator/get_by_text, evaluate, wait_for_selector,
 wait_for_timeout, click, fill). This module implements exactly that subset
 against a `BeautifulSoup`-parsed HTML string, so a test can hand a tool a
-canned HTML page and assert on what the real parsing code extracts from it —
+canned HTML page and assert on what the real parsing code extracts from it,
 without ever starting Chromium or making a request.
 
 It deliberately does not try to be a general Playwright emulator: unsupported
 CSS (Playwright-only pseudo-classes like `:has-text()`) is treated as "no
 match" rather than raising, which mirrors how the real page would behave for
-a selector Playwright accepts but this fake can't evaluate — and matches the
+a selector Playwright accepts but this fake can't evaluate, and matches the
 production code's own pattern of trying several fallback selectors and
 moving on.
 """
@@ -26,14 +26,14 @@ from bs4 import BeautifulSoup, Tag
 
 
 class FakeTimeoutError(Exception):
-    """Stands in for Playwright's TimeoutError — a wait that found nothing."""
+    """Stands in for Playwright's TimeoutError: a wait that found nothing."""
 
 
 def _select(scope: Any, selector: str, *, first: bool):
     stripped = selector.strip()
     if stripped.startswith("text="):
         # Playwright's own `text=` selector engine, used by
-        # people.py's _NOT_AVAILABLE_SELECTORS — not real CSS, so it's
+        # people.py's _NOT_AVAILABLE_SELECTORS, not real CSS, so it's
         # handled separately as a substring text search.
         needle = stripped[len("text="):].strip().strip("'\"")
         matches = _find_by_text([scope], needle)
@@ -168,7 +168,7 @@ class FakeLocator:
     selector still to be applied under each of them the next time this
     locator is resolved. `.first` / `.nth` narrow `base` and clear
     `pending`; `.locator()` chains a new `pending` selector onto the current
-    resolution — the same two-phase laziness Playwright's own Locator has.
+    resolution: the same two-phase laziness Playwright's own Locator has.
     """
 
     def __init__(self, page: "FakePage", base: list[Tag], pending: str | None) -> None:
@@ -265,7 +265,7 @@ class FakePage:
 
 class GuardedSession:
     """A `Session` double that fails the test loudly if `goto` is ever
-    called — for asserting that input validation refuses before any
+    called, for asserting that input validation refuses before any
     navigation happens."""
 
     def __init__(self) -> None:
@@ -284,7 +284,7 @@ class FakeSession:
 
     `pages` may be a single `FakePage` (returned for every `goto`), or a
     dict mapping a path prefix to the `FakePage` to return for paths
-    starting with it — enough to cover tools that navigate more than once
+    starting with it, enough to cover tools that navigate more than once
     per call (e.g. `get_profile` with `sections=["posts"]`).
     """
 

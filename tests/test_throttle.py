@@ -1,6 +1,6 @@
 """Unit tests for linkedin_mcp.throttle.ActionQueue.
 
-No network, no browser — these exercise serialisation and the hourly
+No network, no browser: these exercise serialisation and the hourly
 ceiling directly against the queue's own clock (`time.monotonic`), with
 `min_interval_s=0` so the tests run fast and only the *ordering* /
 *ceiling* guarantees are under test, not the pacing sleep itself (that is
@@ -19,7 +19,7 @@ from linkedin_mcp.throttle import ActionQueue, RateLimited
 @pytest.mark.asyncio
 async def test_actions_are_serialised_not_interleaved() -> None:
     """Two concurrent callers must not run their critical sections at the
-    same time — ActionQueue.run holds a single lock around the whole
+    same time: ActionQueue.run holds a single lock around the whole
     action, so an agent firing calls in parallel still drives the one
     shared browser page one action at a time."""
     queue = ActionQueue(min_interval_s=0, max_per_hour=100)
@@ -46,7 +46,7 @@ async def test_actions_are_serialised_not_interleaved() -> None:
     assert sorted(results) == ["a", "b", "c"]
     # The critical proof of serialisation: never more than one action running.
     assert max_in_flight == 1
-    # Each action's start/end pair must be contiguous — no interleaving.
+    # Each action's start/end pair must be contiguous: no interleaving.
     for i in range(0, len(events), 2):
         label = events[i].split(":")[1]
         assert events[i] == f"start:{label}"
@@ -56,7 +56,7 @@ async def test_actions_are_serialised_not_interleaved() -> None:
 @pytest.mark.asyncio
 async def test_ceiling_refuses_the_next_action_instead_of_hanging() -> None:
     """Once max_per_hour actions have run, the next call must raise
-    RateLimited immediately — not silently sleep until a slot frees up."""
+    RateLimited immediately, not silently sleep until a slot frees up."""
     queue = ActionQueue(min_interval_s=0, max_per_hour=3)
 
     async def noop() -> None:

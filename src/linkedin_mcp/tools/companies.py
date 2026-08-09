@@ -20,18 +20,18 @@ from ..session import Session
 from ..throttle import ActionQueue, RateLimited
 
 # Sections do_get_company can be asked to skip. "about" is the free-text blurb,
-# which can run to a paragraph or more — callers who only want the structured
+# which can run to a paragraph or more. Callers who only want the structured
 # facts can opt out of paying to ship it back through the model.
 _ALL_SECTIONS = ("overview", "about")
 
 _MAX_LIMIT = 25
 
 # Same reasoning as people.py's _ABOUT_LIMIT: never hand a model an unbounded
-# amount of text a stranger authored — cap it and mark the cut visibly.
+# amount of text a stranger authored: cap it and mark the cut visibly.
 _ABOUT_LIMIT = 2000
 
 # Selector calls get their own short timeout rather than inheriting the page's
-# full navigation timeout (session.py sets that to ~30s) — a single tool call
+# full navigation timeout (session.py sets that to ~30s): a single tool call
 # tries several fallback selectors per field, and a slow miss on the first
 # fallback should not stack into a multi-minute call while the queue is held.
 _PROBE_TIMEOUT_MS = 3000
@@ -63,14 +63,14 @@ async def _guarded(queue: ActionQueue, label: str, fn) -> dict:
     Centralised here so the two public tools below stay a straight line of
     scraping logic instead of each carrying its own try/except. A bare
     `Exception` is treated as "the page changed shape" (parse_failed) rather
-    than re-raised — tools never raise into the transport.
+    than re-raised: tools never raise into the transport.
     """
     try:
         return await queue.run(label, fn)
     except LinkedInError as exc:
         return exc.as_dict()
     except RateLimited as exc:
-        # Built from the exception's own typed fields, never str(exc) — keeps
+        # Built from the exception's own typed fields, never str(exc): keeps
         # the "never interpolate a caught exception" rule literal everywhere,
         # even though RateLimited's own message happens to carry no secrets.
         mins = max(1, round(exc.retry_after_s / 60))
@@ -113,7 +113,7 @@ async def _dt_dd_pairs(page: Any) -> dict[str, str]:
     """Read the dt/dd "Overview" list on the About page into a label->value dict.
 
     Matching on the visible label text rather than a class name survives the
-    class-name churn LinkedIn does on every redesign — the labels ("Website",
+    class-name churn LinkedIn does on every redesign: the labels ("Website",
     "Industry", ...) are the one thing that has stayed stable across layouts.
     """
     try:

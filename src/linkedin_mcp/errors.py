@@ -48,7 +48,7 @@ def checkpoint() -> LinkedInError:
         "LinkedIn presented a security checkpoint (CAPTCHA or verification) instead of the page.",
         "Open linkedin.com in your normal browser and complete the challenge there, then "
         "retry. Repeated checkpoints are LinkedIn signalling that it has noticed automated "
-        "access — slow down or stop rather than retrying, since continuing is what escalates "
+        "access. Slow down or stop rather than retrying, since continuing is what escalates "
         "to a restriction.",
     )
 
@@ -75,7 +75,7 @@ def parse_failed(what: str) -> LinkedInError:
     return LinkedInError(
         "parse_failed",
         f"Loaded the page but could not read {what} from it.",
-        "LinkedIn changed its markup — this is a bug in this server rather than anything "
+        "LinkedIn changed its markup: this is a bug in this server rather than anything "
         "you did. Please report it with the tool you called: "
         "https://github.com/JohannsenLum/linkedin-api-mcp/issues",
     )

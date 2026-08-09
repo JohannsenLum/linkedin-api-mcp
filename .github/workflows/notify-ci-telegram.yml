@@ -30,7 +30,7 @@ name: Notify Telegram (CI)
 on:
   workflow_run:
     workflows: [Test, Publish]
-    # `requested` fires as the run starts, `completed` when it finishes — together
+    # `requested` fires as the run starts, `completed` when it finishes: together
     # they bracket the work, so a run that hangs or never reports is visible as a
     # STARTED with no matching finish. This workflow is not itself in the watched
     # list, so it cannot retrigger itself.
@@ -52,7 +52,7 @@ jobs:
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           # Deployment/CI noise goes to Dev Ops. The one exception is "CI is waiting
           # for your approval", which is about a specific PR and belongs where you'd
-          # act on it — it gets its own topic because it is rare, silently blocking,
+          # act on it, and it gets its own topic because it is rare, silently blocking,
           # and has no other symptom. Unset -> posts to General.
           TOPIC_DEVOPS: ${{ vars.TELEGRAM_TOPIC_DEVOPS }}
           TOPIC_APPROVALS: ${{ vars.TELEGRAM_TOPIC_APPROVALS }}
@@ -70,11 +70,11 @@ jobs:
           set -euo pipefail
 
           if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
-            echo "Telegram secrets not set — skipping."
+            echo "Telegram secrets not set, skipping."
             exit 0
           fi
 
-          # export, not plain assignment — the python heredoc is a subprocess.
+          # export, not plain assignment: the python heredoc is a subprocess.
           # On a `requested` event `conclusion` is null, so status comes from ACTION.
           if [ "$ACTION" = "requested" ]; then
             export ICON="🔵" STATUS="STARTED"
@@ -90,7 +90,7 @@ jobs:
           fi
 
           # A fork PR from a first-time contributor holds CI until you approve it.
-          # Nothing else tells you that — you'd otherwise find out by wondering why
+          # Nothing else tells you that; you'd otherwise find out by wondering why
           # a PR sat with no checks. Route it to the PR topic, where you'd act.
           if [ "$CONCLUSION" = "action_required" ]; then
             export TG_TOPIC="${TOPIC_APPROVALS:-}"
@@ -110,17 +110,17 @@ jobs:
           wf = os.environ["WF_NAME"]
           concl = os.environ.get("CONCLUSION") or ""
           icon, status = os.environ["ICON"], os.environ["STATUS"]
-          # First line of the commit message only — bodies are long and noisy.
+          # First line of the commit message only: bodies are long and noisy.
           subject = (os.environ.get("COMMIT_MSG") or "").splitlines()
           subject = subject[0] if subject else ""
           sha = (os.environ.get("COMMIT_SHA") or "")[:7]
 
-          # A publish is the one event worth breaking the format for — it is the
+          # A publish is the one event worth breaking the format for: it is the
           # only thing here that reaches users rather than just the repo.
           if wf == "Publish" and concl == "success":
-              headline = "🚀 <b>PUBLISHED</b> — PyPI and the MCP registry"
+              headline = "🚀 <b>PUBLISHED</b>: PyPI and the MCP registry"
           else:
-              headline = f"{icon} <b>{status}</b> — {esc(wf, 40)}"
+              headline = f"{icon} <b>{status}</b>: {esc(wf, 40)}"
 
           lines = [
               headline,

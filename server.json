@@ -20,7 +20,7 @@
       "environmentVariables": [
         {
           "name": "LINKEDIN_COOKIE",
-          "description": "Your LinkedIn li_at session cookie. Optional if you have already stored it in the OS keyring with `linkedin-api-mcp auth`, which is the recommended route \u2014 this cookie is equivalent to being logged in as you.",
+          "description": "Your LinkedIn li_at session cookie. Optional if you have already stored it in the OS keyring with `linkedin-api-mcp auth`, which is the recommended route: this cookie is equivalent to being logged in as you.",
           "isRequired": false,
           "isSecret": true
         },

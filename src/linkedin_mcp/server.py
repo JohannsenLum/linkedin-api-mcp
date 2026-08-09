@@ -2,19 +2,19 @@
 whole process shares, and registers every tool on top of them.
 
 This module is glue only. It never touches Playwright or LinkedIn markup
-directly — that lives in linkedin_mcp.tools.* as `do_<tool_name>` coroutines
+directly: that lives in linkedin_mcp.tools.* as `do_<tool_name>` coroutines
 that take `(session, queue, *args)` and already do their own queuing and
 error translation: each one calls `queue.run(label, ...)` itself and catches
 `RateLimited` / `LinkedInError` / a bare `Exception` internally, so it always
 returns a JSON-safe dict and never raises. `queue` is threaded through as a
 plain argument rather than closed over, so there is exactly one ActionQueue
-instance and every tool module serialises through the same lock — nothing
+instance and every tool module serialises through the same lock. Nothing
 here re-wraps a call in `queue.run` a second time, since `asyncio.Lock` is
 not reentrant and doing so would deadlock the tool on its own queue.
 
 The one exception is `linkedin_status`: it isn't backed by a tool module, so
 this file drives its single `session.goto` through `queue.run` directly.
-`_safe()` below is the defensive net for both cases — for the tool modules
+`_safe()` below is the defensive net for both cases: for the tool modules
 it should never fire (they're already self-guarded), for `linkedin_status`
 it's where `RateLimited` actually gets turned into a structured error.
 """
@@ -67,13 +67,13 @@ async def _safe(label: str, call: Awaitable[dict]) -> dict:
     # Defense in depth, not the primary mechanism: every do_* coroutine passed
     # in here already guards itself (queue.run + RateLimited + LinkedInError +
     # a bare-Exception fallback all live inside the tool module). This only
-    # matters if one of them doesn't — a bug there still can't raise into the
+    # matters if one of them doesn't. A bug there still can't raise into the
     # transport, and still never interpolates the exception, since Playwright's
     # exception text embeds the URL it was driving.
     try:
         return await call
     except RateLimited as exc:
-        # Built from the exception's own typed fields, never str(exc) — keeps
+        # Built from the exception's own typed fields, never str(exc): keeps
         # the "never interpolate a caught exception" rule literal here too,
         # even though RateLimited's own message happens to carry no secrets.
         mins = max(1, round(exc.retry_after_s / 60))
@@ -110,7 +110,7 @@ def build_server(config: Config) -> FastMCP:
         try:
             yield {}
         finally:
-            # The browser must not outlive the MCP process — an orphaned
+            # The browser must not outlive the MCP process: an orphaned
             # Chromium holding the session cookie is exactly the kind of
             # thing this server exists to avoid.
             await session.close()
@@ -126,7 +126,7 @@ def build_server(config: Config) -> FastMCP:
             "about, current position. `profile` accepts a full profile URL or just the "
             "public identifier (the part after /in/). `sections` selects which extra "
             "sections to include, from {'experience', 'education', 'skills', "
-            "'certifications', 'projects', 'languages', 'honors', 'posts'} — defaults to "
+            "'certifications', 'projects', 'languages', 'honors', 'posts'}: defaults to "
             "experience and education. 'posts' costs one extra page load; every other "
             "section is free since it's already on the profile page. Read-only."
         ),
@@ -149,7 +149,7 @@ def build_server(config: Config) -> FastMCP:
         name="search_people",
         description=(
             "Search LinkedIn members by keywords (name, title, company, school). "
-            "Returns lightweight results — call get_profile for full detail on any hit. "
+            "Returns lightweight results. Call get_profile for full detail on any hit. "
             "Read-only."
         ),
         annotations=_read_annotations("Search People"),
@@ -165,7 +165,7 @@ def build_server(config: Config) -> FastMCP:
         name="get_inbox",
         description=(
             "List your most recent LinkedIn message threads as previews (participant, "
-            "snippet, timestamp, conversation id) — not full history. Use get_conversation "
+            "snippet, timestamp, conversation id), not full history. Use get_conversation "
             "with a returned conversation id for the full thread. Read-only."
         ),
         annotations=_read_annotations("Get Inbox"),
@@ -243,7 +243,7 @@ def build_server(config: Config) -> FastMCP:
             "Fetch a LinkedIn company page: name, tagline, industry, size, headquarters, "
             "website, follower count, and the free-text About blurb. `company` accepts a "
             "full /company/<slug> URL or the bare slug. `sections` optionally restricts the "
-            "result to a subset of {'overview', 'about'} — omit it to get both. Read-only."
+            "result to a subset of {'overview', 'about'}. Omit it to get both. Read-only."
         ),
         annotations=_read_annotations("Get Company"),
     )
@@ -430,7 +430,7 @@ def _cmd_serve() -> None:
         raise SystemExit(1) from None
 
     mcp = build_server(config)
-    mcp.run()  # stdio by default — this is what MCP clients spawn as a subprocess.
+    mcp.run()  # stdio by default: this is what MCP clients spawn as a subprocess.
 
 
 def main() -> None:
