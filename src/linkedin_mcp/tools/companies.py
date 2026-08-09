@@ -180,7 +180,7 @@ def _lookup(pairs: dict[str, str], *labels: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 # document.title survives every rebuild. LinkedIn renders it as
-# "(N) <Company Name>: About | LinkedIn" — the unread-count prefix and the
+# "(N) <Company Name>: About | LinkedIn", the unread-count prefix and the
 # page-tab suffix both vary independently, so both are stripped rather than
 # assumed. The self link (this page's own /company/<slug>/ href) is read the
 # same way people.py reads /in/<id>: it's present in the verified badge and

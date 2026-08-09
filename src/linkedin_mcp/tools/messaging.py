@@ -221,7 +221,7 @@ _UNREAD_BADGE_SELECTORS = (
 #
 # What this cannot do, in the current markup: give back a conversation_id.
 # A row here has no href and no data-urn anywhere in its subtree (verified
-# against a captured `/messaging/` page) — LinkedIn binds the click to an
+# against a captured `/messaging/` page), LinkedIn binds the click to an
 # in-memory Ember reference, not a URL, so there is nothing structural to read
 # without actually clicking every row, which turns one inbox read into N
 # extra navigations. The href-based lookup is kept below as a fallback in case

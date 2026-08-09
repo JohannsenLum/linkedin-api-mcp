@@ -13,7 +13,7 @@ rules `people.py` established:
     ("1d •", "21h •"): that string is always the last field LinkedIn renders
     in the actor header before the Follow control, so its appearance is a far
     more reliable "header is complete" signal than a fixed field count would
-    be — a company post has no separate headline line and would blow straight
+    be, a company post has no separate headline line and would blow straight
     past a naive count.
   - Reaction and comment counts are NOT in an aria-label on this page (that
     was checked against the fixture and is not what's actually there): they
@@ -201,7 +201,7 @@ _POST_ROWS_JS = r"""() => {
   // Climb from the author's own /in/ or /company/ link to the smallest
   // ancestor whose deduped text already contains a posted-at-shaped string
   // ("1d •"). That string is always the last header field before the Follow
-  // control, so its appearance means the header is complete — unlike a fixed
+  // control, so its appearance means the header is complete, unlike a fixed
   // string-count threshold, this does not overshoot on a company post, which
   // has no separate headline line and would otherwise blow straight past a
   // count-based stop into the post body. Bounded to 8 climbs, and stops
@@ -249,7 +249,7 @@ _POST_ROWS_JS = r"""() => {
   );
 
   // A count paragraph has its digit run directly against the word ("5
-  // reactions", "216reactions" once concatenated — see the module
+  // reactions", "216reactions" once concatenated, see the module
   // docstring). Requiring that adjacency, rather than "contains a digit
   // and contains the word anywhere", matters: a long post body easily
   // contains both separately (a "Week 2" earlier in the paragraph and
