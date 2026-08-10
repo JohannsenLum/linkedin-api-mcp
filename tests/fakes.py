@@ -229,13 +229,27 @@ class FakeLocator:
 
 
 class FakePage:
-    """Stands in for Playwright's Page, backed by a static HTML document."""
+    """Stands in for Playwright's Page, backed by a static HTML document.
 
-    def __init__(self, html: str, url: str = "https://www.linkedin.com/") -> None:
+    `evaluate_result`, when set, is returned from every `evaluate` call instead
+    of running the built-in HTML-backed stubs. That is how tests drive tools
+    whose primary path is a structural `page.evaluate(...)` (e.g.
+    `search_people`'s `_SEARCH_ROWS_JS`) without a real browser: pass the
+    canned rows the production JS would have returned.
+    """
+
+    def __init__(
+        self,
+        html: str,
+        url: str = "https://www.linkedin.com/",
+        *,
+        evaluate_result: Any = None,
+    ) -> None:
         self.soup = BeautifulSoup(html, "html.parser")
         self.url = url
         self.clicked: list[Tag] = []
         self.filled: list[tuple[Tag, str]] = []
+        self.evaluate_result = evaluate_result
 
     async def query_selector(self, selector: str) -> FakeElement | None:
         found = _select(self.soup, selector, first=True)
@@ -253,7 +267,13 @@ class FakePage:
     async def wait_for_timeout(self, ms: int) -> None:
         return None
 
-    async def evaluate(self, js: str) -> Any:
+    async def evaluate(self, js: str, *args: Any) -> Any:
+        # Production code sometimes passes extra args (e.g. search limit).
+        # Structural-path tests supply evaluate_result; otherwise fall through
+        # to the handful of HTML-backed stubs (or raise NotImplementedError).
+        if self.evaluate_result is not None:
+            return self.evaluate_result
+        del args  # unused by the HTML-backed stubs
         return _evaluate(self.soup, js)
 
     def locator(self, selector: str) -> FakeLocator:
