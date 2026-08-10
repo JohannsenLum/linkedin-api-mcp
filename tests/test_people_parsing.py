@@ -85,7 +85,9 @@ async def test_get_profile_extracts_top_card_and_default_sections() -> None:
     assert result.get("error") is not True
     assert result["public_id"] == "jane-doe"
     assert result["name"] == "Jane Doe"
-    assert result["headline"] == "Senior Engineer at Acme"
+    # Headline is untrusted free text: must be fenced like About.
+    assert result["headline"].startswith("<<<LINKEDIN-UNTRUSTED-DATA:profile.headline:")
+    assert "Senior Engineer at Acme" in result["headline"]
     assert result["location"] == "San Francisco, CA"
     assert result["connections"] == "500+ connections"
 
@@ -131,6 +133,23 @@ async def test_get_profile_about_is_fenced_as_untrusted_data() -> None:
     assert about.startswith("<<<LINKEDIN-UNTRUSTED-DATA:profile.about:")
     assert "Building things that matter." in about
     assert "untrusted content" in about.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_profile_headline_is_fenced_as_untrusted_data() -> None:
+    """README guarantees headlines are fenced before agents see them (#6)."""
+    page = FakePage(PROFILE_HTML)
+    session = FakeSession(page)
+    queue = make_queue()
+
+    result = await people.do_get_profile(session, queue, "jane-doe")
+
+    headline = result["headline"]
+    assert headline is not None
+    assert headline.startswith("<<<LINKEDIN-UNTRUSTED-DATA:profile.headline:")
+    assert "Senior Engineer at Acme" in headline
+    assert "untrusted content" in headline.lower()
+    assert "END-LINKEDIN-UNTRUSTED-DATA:profile.headline:" in headline
 
 
 @pytest.mark.asyncio
