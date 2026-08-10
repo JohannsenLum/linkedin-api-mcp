@@ -328,5 +328,20 @@ Issues and pull requests are welcome:
 [github.com/JohannsenLum/linkedin-api-mcp](https://github.com/JohannsenLum/linkedin-api-mcp).
 Changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
+### Running the tests
+
+Install the development dependencies and run pytest from the repository root:
+
+```bash
+pip install -e ".[dev]"
+python -m pytest -q
+```
+
+The default test suite does not need Chromium, a LinkedIn account,
+`LINKEDIN_COOKIE`, or network access. Browser interactions are replaced by the test
+doubles in [`tests/fakes.py`](tests/fakes.py), which parse canned HTML and expose
+the small Playwright surface used by the tools. For a parsing-test example, see
+[`tests/test_people_parsing.py`](tests/test_people_parsing.py).
+
 This is an independent project, not affiliated with LinkedIn Corporation. See the
 disclaimer at the top of this document.
