@@ -65,6 +65,9 @@ _SECTION_LIMITS = {
 }
 
 _ABOUT_LIMIT = 2000
+# LinkedIn allows ~220 characters; keep a hard cap before fencing so a
+# hostile/over-long headline cannot pad the model context.
+_HEADLINE_LIMIT = 220
 _DESCRIPTION_LIMIT = 1500
 _POST_TEXT_LIMIT = 1500
 
@@ -762,7 +765,11 @@ async def _scrape_profile(
         "public_id": pid,
         "profile_url": f"{_BASE}/in/{pid}/",
         "name": name,
-        "headline": headline,
+        # Headline is free text chosen by the profile owner (same trust
+        # boundary as About). Fence it so agents cannot treat it as instructions.
+        "headline": fence(
+            truncate(headline, _HEADLINE_LIMIT, "headline"), "profile.headline"
+        ),
         "location": location,
         "connections": connections,
         "followers": followers,
@@ -873,7 +880,14 @@ async def do_search_people(
                         "public_id": r.get("public_id"),
                         "profile_url": r.get("profile_url"),
                         "degree": r.get("degree"),
-                        "headline": clean(r.get("headline")),
+                        "headline": fence(
+                            truncate(
+                                clean(r.get("headline")),
+                                _HEADLINE_LIMIT,
+                                "headline",
+                            ),
+                            "search.headline",
+                        ),
                         "location": clean(r.get("location")),
                     }
                     for r in rows
@@ -911,7 +925,14 @@ async def do_search_people(
             results.append(
                 {
                     "name": clean(await _first_text(item, _SEARCH_NAME_SELECTORS)),
-                    "headline": clean(await _first_text(item, _SEARCH_HEADLINE_SELECTORS)),
+                    "headline": fence(
+                        truncate(
+                            clean(await _first_text(item, _SEARCH_HEADLINE_SELECTORS)),
+                            _HEADLINE_LIMIT,
+                            "headline",
+                        ),
+                        "search.headline",
+                    ),
                     "location": clean(await _first_text(item, _SEARCH_LOCATION_SELECTORS)),
                     "profile_url": profile_url,
                     "public_id": pid,
