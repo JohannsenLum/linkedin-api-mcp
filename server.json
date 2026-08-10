@@ -3,7 +3,7 @@
   "name": "io.github.JohannsenLum/linkedin-api-mcp",
   "title": "LinkedIn",
   "description": "Read LinkedIn profiles, companies, jobs and messages via your own browser session",
-  "version": "0.0.4",
+  "version": "1.0.0",
   "repository": {
     "url": "https://github.com/JohannsenLum/linkedin-api-mcp",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "linkedin-api-mcp",
-      "version": "0.0.4",
+      "version": "1.0.0",
       "transport": {
         "type": "stdio"
       },

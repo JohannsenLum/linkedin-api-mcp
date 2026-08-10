@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.0.0] - 2026-08-10
+
+First stable release. The tool surface, the return shapes and the safety
+guarantees are now a contract, and a breaking change to any of them means 2.0.0.
+
+### Security
+
+- **Headlines are fenced as untrusted data.** A LinkedIn headline is free text any
+  stranger can write, and it was reaching a model that also holds `send_message`
+  and `connect`. The README already promised that human-written text is fenced and
+  `about` was, but `headline` was not, so the guarantee was only partly true.
+
+  Now fenced at all three sites, `get_profile`, the `search_people` structural row
+  path, and the selector fallback, through the same `clean`, `truncate`, `fence`
+  pipeline as `about`, with `fence` outermost so its boundary nonce is still
+  generated after the content exists. `_HEADLINE_LIMIT` is 220, matching
+  LinkedIn's own headline cap, so truncation never fires on a real headline.
+
+  Contributed by @VedantMadane in #12, closing #6.
+
+- **Regression tests now guard the fencing.** Previously only the `get_profile`
+  site was covered, so the two `search_people` paths could have been silently
+  unfenced by a refactor with the suite staying green. All three paths are now
+  tested, and the fence label is pinned as well as the wrapper, since a
+  mislabelled provenance marker is how a reader later mistakes one field for
+  another. `tests/fakes.py` gained a search-results fixture that future search
+  tests can reuse.
+
+### Added
+
+- **Contributing docs explain how to run the tests.** The default suite needs no
+  Chromium, no LinkedIn account, no cookie and no network access, which was true
+  but written down nowhere. Contributed by @averyquinnhq in #11, closing #7.
+
+### Changed
+
+- **Breaking:** `headline` is now a fenced string rather than a raw value in
+  `get_profile` and `search_people`. Callers matching on exact content must match
+  on containment instead.
+
 ## [0.0.4] - 2026-08-10
 
 ### Fixed
