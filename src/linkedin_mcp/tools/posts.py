@@ -35,11 +35,10 @@ rules `people.py` established:
     the first marks where the embed begins, and everything gathered for the
     outer post is bounded to before it.
 
-Post bodies are the one field on this page an attacker fully controls: anyone
-can publish a LinkedIn post whose text is written to look like instructions to
-whatever eventually reads these results. `_fence` wraps that text in an inert,
-clearly-labelled block before it leaves this module; nothing here ever returns
-a raw post body.
+Post bodies and author headlines are fields on this page an attacker fully
+controls: anyone can publish text written to look like instructions to whatever
+eventually reads these results. `_fence` wraps both in inert, clearly-labelled
+blocks before they leave this module; nothing here returns either field raw.
 """
 
 from __future__ import annotations
@@ -49,7 +48,7 @@ from typing import Any
 from urllib.parse import quote_plus
 
 from ..errors import LinkedInError, parse_failed
-from ..safety import fence
+from ..safety import clean, fence
 from ..safety import truncate as safety_truncate
 from ..session import Session
 from ..throttle import ActionQueue, RateLimited
@@ -72,6 +71,7 @@ _SCROLL_WAIT_MS = 1200
 # unbounded amount of text a stranger authored: cap it and mark the cut
 # visibly rather than silently.
 _POST_TEXT_LIMIT = 1500
+_AUTHOR_HEADLINE_LIMIT = 220
 
 # --- selector tables --------------------------------------------------------
 # LinkedIn ships more than one markup for the same card depending on rollout
@@ -360,7 +360,14 @@ def _finalize_structural_post(raw: dict[str, Any]) -> dict[str, Any] | None:
 
     return {
         "author_name": author_name,
-        "author_headline": (raw.get("author_headline") or "").strip() or None,
+        "author_headline": fence(
+            safety_truncate(
+                clean(raw.get("author_headline")),
+                _AUTHOR_HEADLINE_LIMIT,
+                "post author headline",
+            ),
+            "post.author_headline",
+        ),
         "author_public_id": raw.get("author_public_id") or None,
         "posted_at": _clean_posted_at(raw.get("posted_at_raw")),
         "reaction_count": _parse_count(raw.get("reaction_text")),
@@ -517,7 +524,14 @@ async def _extract_post(item: Any) -> dict[str, Any] | None:
 
     return {
         "author_name": author_name,
-        "author_headline": author_headline,
+        "author_headline": fence(
+            safety_truncate(
+                clean(author_headline),
+                _AUTHOR_HEADLINE_LIMIT,
+                "post author headline",
+            ),
+            "post.author_headline",
+        ),
         "author_public_id": _extract_public_id(profile_href),
         "posted_at": posted_at,
         "reaction_count": reaction_count,

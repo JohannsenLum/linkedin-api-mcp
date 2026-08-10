@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Post author headlines are now fenced as untrusted content, matching the
+  existing protection for post bodies and preventing headline-based prompt
+  injection from being presented as trusted tool output.
+
 - **`experience` and `education` are no longer empty.** The assumption was that
   they lazy-load on scroll. That was wrong: scrolling six screens leaves the page
   text byte-identical. They are not on the profile page at all. They live at
@@ -73,4 +77,3 @@ The first version whose parsers have actually been run against LinkedIn.
   to an in-memory object rather than a URL, so there is nothing to read.
 - Post reaction and comment counts return `null`.
 - `experience` and `education` load only on scroll, and are still empty.
-
