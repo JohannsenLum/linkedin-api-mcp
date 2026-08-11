@@ -28,10 +28,11 @@ import json
 import sys
 from collections.abc import Awaitable
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastmcp import FastMCP
 
+from . import __version__
 from .config import Config, ConfigError, store_cookie
 from .errors import LinkedInError
 from .session import Session
@@ -435,29 +436,46 @@ def _cmd_auth() -> None:
     print("Run `linkedin-api-mcp --test` to verify it works.")
 
 
-def _cmd_test() -> None:
+def _cmd_test(as_json: bool = False) -> None:
     try:
         config = Config.from_env()
     except ConfigError as exc:
-        print(str(exc), file=sys.stderr)
+        if as_json:
+            print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+        else:
+            print(str(exc), file=sys.stderr)
         raise SystemExit(1) from None
 
+    error_detail: str | None = None
+
     async def _probe() -> bool:
+        nonlocal error_detail
         session = Session(config)
         try:
             await session.goto("/feed/")
             return True
         except LinkedInError as exc:
-            print(f"{exc.kind}: {exc.message}", file=sys.stderr)
-            if exc.hint:
-                print(exc.hint, file=sys.stderr)
+            error_detail = f"{exc.kind}: {exc.message}"
+            if not as_json:
+                print(f"{exc.kind}: {exc.message}", file=sys.stderr)
+                if exc.hint:
+                    print(exc.hint, file=sys.stderr)
             return False
         finally:
             await session.close()
 
     ok = asyncio.run(_probe())
-    print(json.dumps(config.redacted(), indent=2))
-    print("Session OK." if ok else "Session check failed; see above.")
+    if as_json:
+        payload: dict[str, Any] = {
+            "ok": ok,
+            "config": config.redacted(),
+        }
+        if error_detail:
+            payload["error"] = error_detail
+        print(json.dumps(payload, indent=2))
+    else:
+        print(json.dumps(config.redacted(), indent=2))
+        print("Session OK." if ok else "Session check failed; see above.")
     raise SystemExit(0 if ok else 1)
 
 
@@ -478,9 +496,20 @@ def main() -> None:
         description="MCP server for LinkedIn, driving a real browser over your own session cookie.",
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show program's version number and exit.",
+    )
+    parser.add_argument(
         "--test",
         action="store_true",
         help="Verify the stored session is authenticated, print the redacted config, and exit.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON output for --test.",
     )
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("auth", help="Prompt for your li_at cookie and store it in the OS keyring.")
@@ -490,7 +519,7 @@ def main() -> None:
     if args.command == "auth":
         _cmd_auth()
     elif args.test:
-        _cmd_test()
+        _cmd_test(as_json=args.json)
     else:
         _cmd_serve()
 
