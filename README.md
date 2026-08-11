@@ -234,6 +234,17 @@ same session cookie your browser already holds.
    Prints the server's redacted configuration and confirms the session is live.
    It never prints the cookie itself.
 
+   For machine-readable output (suitable for health checks), pass `--json`:
+   ```bash
+   uvx linkedin-api-mcp --test --json
+   ```
+   Emits valid JSON containing `"ok": true` (or `false`), error details if probe fails, and redacted config details.
+
+7. Check the installed package version:
+   ```bash
+   uvx linkedin-api-mcp --version
+   ```
+
 ## Tools
 
 | Tool | Description |
