@@ -45,7 +45,9 @@ async def test_get_company_extracts_top_card_and_overview() -> None:
     assert result.get("error") is not True
     assert result["slug"] == "acme-corp"
     assert result["name"] == "Acme Corp"
-    assert result["tagline"] == "Widgets for the modern age"
+    # Fenced as untrusted, so containment rather than equality. The fence itself
+    # is asserted in test_get_company_tagline_is_fenced_as_untrusted_data.
+    assert "Widgets for the modern age" in result["tagline"]
     assert result["industry"] == "Manufacturing"
     assert result["size"] == "201-500 employees"
     assert result["headquarters"] == "Springfield, IL"
@@ -66,6 +68,44 @@ async def test_get_company_about_is_fenced_as_untrusted_data() -> None:
     assert about.startswith("<<<LINKEDIN-UNTRUSTED-DATA:company.about:")
     assert "We build the finest widgets" in about
     assert "untrusted content" in about.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_company_tagline_is_fenced_as_untrusted_data() -> None:
+    """A tagline is prose the company writes about itself, so it is untrusted.
+
+    The label is asserted as well as the wrapper. Swapping it for company.about
+    removes no protection but tells a later reader they are looking at a field
+    that has already been treated as a long free-text blurb.
+    """
+    page = FakePage(COMPANY_HTML)
+    session = FakeSession(page)
+    queue = make_queue()
+
+    result = await companies.do_get_company(session, queue, "acme-corp")
+
+    tagline = result["tagline"]
+    assert tagline.startswith("<<<LINKEDIN-UNTRUSTED-DATA:company.tagline:")
+    assert "<<<END-LINKEDIN-UNTRUSTED-DATA:company.tagline:" in tagline
+    assert "Widgets for the modern age" in tagline
+    assert "untrusted content" in tagline.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_company_name_is_not_fenced() -> None:
+    """`name` is a short identifier the caller matches on, not prose.
+
+    Fencing it would make every company result harder to use for no security
+    gain, so this pins the deliberate asymmetry with `tagline` above.
+    """
+    page = FakePage(COMPANY_HTML)
+    session = FakeSession(page)
+    queue = make_queue()
+
+    result = await companies.do_get_company(session, queue, "acme-corp")
+
+    assert result["name"] == "Acme Corp"
+    assert "UNTRUSTED-DATA" not in result["name"]
 
 
 @pytest.mark.asyncio

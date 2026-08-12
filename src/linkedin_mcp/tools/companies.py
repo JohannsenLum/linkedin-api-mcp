@@ -52,6 +52,12 @@ _MAX_LIMIT = 25
 # amount of text a stranger authored: cap it and mark the cut visibly.
 _ABOUT_LIMIT = 2000
 
+# A tagline is one line by construction, and LinkedIn caps the field at 120
+# characters. The limit is generous enough that truncation never fires on a
+# real one, and exists so a malformed parse cannot smuggle a whole page in
+# through a field the reader expects to be short.
+_TAGLINE_LIMIT = 300
+
 # Selector calls get their own short timeout rather than inheriting the page's
 # full navigation timeout (session.py sets that to ~30s): a single tool call
 # tries several fallback selectors per field, and a slow miss on the first
@@ -344,7 +350,13 @@ async def do_get_company(
             "slug": slug,
             "url": f"https://www.linkedin.com/company/{slug}/",
             "name": _clean(name),
-            "tagline": tagline,
+            # Free text the company writes about itself, so untrusted in the
+            # same sense as a profile headline. `name` stays plain: it is a
+            # short identifier the caller matches on, not prose.
+            "tagline": fence(
+                safety_truncate(tagline, _TAGLINE_LIMIT, "company tagline"),
+                "company.tagline",
+            ),
         }
 
         if "overview" in wanted:
