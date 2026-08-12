@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.0.1] - 2026-08-12
+
+### Security
+
+- **`search_posts` fences the author's headline.** It fenced the post body but
+  returned `author_headline` raw, so the tool that surfaces posts from strangers
+  was the one place untrusted free text still reached the model unmarked. Fenced
+  on both the structural row path and the selector fallback, with a 220 character
+  limit matching LinkedIn's own headline cap. Contributed by @adity982 in #15,
+  closing #13.
+
+- **`get_company` fences the tagline.** It fenced the `about` blurb but returned
+  `tagline` with only whitespace normalisation. A tagline is prose the company
+  writes about itself, so it is untrusted in the same sense as a profile
+  headline, and `search_companies` returns companies the user has no relationship
+  with. Closes #18.
+
+  `name` stays plain, and a test now pins that: it is a short identifier callers
+  match on, not prose, so the asymmetry reads as a decision rather than another
+  missed field.
+
+### Added
+
+- **A structural guard for the fencing promise.** Every other fencing test named
+  one field, so the README's "fencing on all scraped free text" was enforced by
+  attention rather than by the suite. Three fields had already slipped through
+  that way: `headline` (#6), `author_headline` (#13) and `company.tagline` (#18),
+  each found by reading code rather than by a failing test.
+
+  `tests/test_fencing_coverage.py` walks the tool modules and fails if any
+  prose-shaped key is returned without a fence, against an explicit allowlist of
+  structural keys. Adding to that allowlist is a visible decision in review.
+  Verified by reverting all three historical fixes in turn: the guard catches
+  every one. Closes #19.
+
+### Changed
+
+- **Breaking, patch-level:** `tagline` is now a fenced string rather than a raw
+  value. Callers matching on exact content must match on containment. Treated as
+  a patch because the README already promised this field would be fenced; the
+  code was not honouring its own documented contract.
+
+
 ## [1.0.0] - 2026-08-10
 
 First stable release. The tool surface, the return shapes and the safety
