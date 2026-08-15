@@ -22,7 +22,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parent.parent / "src" / "linkedin_mcp" / "tools"
+SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "linkedin_mcp"
+# safety.py defines fence(); walking it would flag the implementation itself.
+SKIP_FILES = {"safety.py"}
 
 # Keys whose values are prose a stranger authored. These must be fenced.
 PROSE_KEYS = {
@@ -92,7 +94,10 @@ def _unfenced_prose_fields() -> list[str]:
     make a real unfenced message body look handled.
     """
     offenders: list[str] = []
-    for path in sorted(TOOLS_DIR.glob("*.py")):
+    for path in sorted(SRC_DIR.rglob("*.py")):
+        if path.name in SKIP_FILES:
+            continue
+        rel = path.relative_to(SRC_DIR)
         lines = path.read_text().splitlines()
         for i, line in enumerate(lines, start=1):
             m = ENTRY.match(line)
@@ -109,7 +114,7 @@ def _unfenced_prose_fields() -> list[str]:
             window = "\n".join(lines[i - 1 : i + 4])
             if "fence(" in window:
                 continue
-            offenders.append(f"{path.name}:{i} {key}")
+            offenders.append(f"{rel}:{i} {key}")
     return offenders
 
 
@@ -145,11 +150,11 @@ def test_the_guard_actually_detects_an_unfenced_field(tmp_path, monkeypatch):
     it would find nothing and report success forever, which is exactly the
     failure mode it was written to eliminate.
     """
-    fake_tools = tmp_path / "tools"
-    fake_tools.mkdir()
-    (fake_tools / "planted.py").write_text(
+    fake_src = tmp_path / "linkedin_mcp"
+    fake_src.mkdir()
+    (fake_src / "planted.py").write_text(
         'def build():\n    return {\n        "headline": raw_headline,\n    }\n'
     )
-    monkeypatch.setattr("tests.test_fencing_coverage.TOOLS_DIR", fake_tools)
+    monkeypatch.setattr("tests.test_fencing_coverage.SRC_DIR", fake_src)
 
     assert any("headline" in o for o in _unfenced_prose_fields())
