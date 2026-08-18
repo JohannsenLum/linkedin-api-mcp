@@ -31,7 +31,7 @@ COMPANY_HTML = """
 
 
 def make_queue() -> ActionQueue:
-    return ActionQueue(min_interval_s=0, max_per_hour=100)
+    return ActionQueue(min_interval_s=0, max_per_hour=100, persist=False)
 
 
 @pytest.mark.asyncio

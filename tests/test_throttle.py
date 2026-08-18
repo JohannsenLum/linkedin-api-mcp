@@ -22,7 +22,7 @@ async def test_actions_are_serialised_not_interleaved() -> None:
     same time: ActionQueue.run holds a single lock around the whole
     action, so an agent firing calls in parallel still drives the one
     shared browser page one action at a time."""
-    queue = ActionQueue(min_interval_s=0, max_per_hour=100)
+    queue = ActionQueue(min_interval_s=0, max_per_hour=100, persist=False)
     events: list[str] = []
     in_flight = 0
     max_in_flight = 0
@@ -57,7 +57,7 @@ async def test_actions_are_serialised_not_interleaved() -> None:
 async def test_ceiling_refuses_the_next_action_instead_of_hanging() -> None:
     """Once max_per_hour actions have run, the next call must raise
     RateLimited immediately, not silently sleep until a slot frees up."""
-    queue = ActionQueue(min_interval_s=0, max_per_hour=3)
+    queue = ActionQueue(min_interval_s=0, max_per_hour=3, persist=False)
 
     async def noop() -> None:
         return None
@@ -77,7 +77,7 @@ async def test_ceiling_refuses_the_next_action_instead_of_hanging() -> None:
 async def test_ceiling_is_a_rolling_window_not_a_hard_stop() -> None:
     """snapshot() reports usage without mutating state or requiring the
     lock, and reflects pruning of actions older than the rolling hour."""
-    queue = ActionQueue(min_interval_s=0, max_per_hour=5)
+    queue = ActionQueue(min_interval_s=0, max_per_hour=5, persist=False)
 
     async def noop() -> None:
         return None
@@ -94,7 +94,7 @@ async def test_ceiling_is_a_rolling_window_not_a_hard_stop() -> None:
 async def test_pacing_enforces_minimum_interval() -> None:
     """A real (small) min_interval_s must make the second action wait,
     proving the pacing floor is applied, not just documented."""
-    queue = ActionQueue(min_interval_s=0.1, max_per_hour=100)
+    queue = ActionQueue(min_interval_s=0.1, max_per_hour=100, persist=False)
 
     async def noop() -> None:
         return None
@@ -112,7 +112,7 @@ async def test_pacing_enforces_minimum_interval() -> None:
 async def test_exception_from_action_propagates_and_still_counts() -> None:
     """A failing action must not corrupt the queue's bookkeeping or block
     later calls, and the caller must actually see the failure."""
-    queue = ActionQueue(min_interval_s=0, max_per_hour=100)
+    queue = ActionQueue(min_interval_s=0, max_per_hour=100, persist=False)
 
     async def boom() -> None:
         raise ValueError("simulated failure")
@@ -127,3 +127,52 @@ async def test_exception_from_action_propagates_and_still_counts() -> None:
         return "ok"
 
     assert await queue.run("noop", noop) == "ok"
+
+
+@pytest.mark.asyncio
+async def test_hourly_history_survives_restart(tmp_path) -> None:
+    """Killing the process must not reset the rolling-hour ceiling."""
+    state = tmp_path / "rate_limit.json"
+
+    async def noop() -> None:
+        return None
+
+    first = ActionQueue(
+        min_interval_s=0, max_per_hour=3, state_path=state, persist=True
+    )
+    await first.run("a", noop)
+    await first.run("b", noop)
+    assert first.snapshot()["actions_last_hour"] == 2
+
+    # New process / new instance, same state file.
+    second = ActionQueue(
+        min_interval_s=0, max_per_hour=3, state_path=state, persist=True
+    )
+    snap = second.snapshot()
+    assert snap["actions_last_hour"] == 2
+
+    await second.run("c", noop)
+    with pytest.raises(RateLimited) as excinfo:
+        await second.run("d", noop)
+    assert excinfo.value.used == 3
+    assert excinfo.value.ceiling == 3
+
+
+@pytest.mark.asyncio
+async def test_two_instances_share_ceiling(tmp_path) -> None:
+    """Two ActionQueues on the same state file share one hourly budget."""
+    state = tmp_path / "rate_limit.json"
+
+    async def noop() -> None:
+        return None
+
+    a = ActionQueue(min_interval_s=0, max_per_hour=2, state_path=state, persist=True)
+    b = ActionQueue(min_interval_s=0, max_per_hour=2, state_path=state, persist=True)
+
+    await a.run("a1", noop)
+    await b.run("b1", noop)
+
+    with pytest.raises(RateLimited):
+        await a.run("a2", noop)
+    with pytest.raises(RateLimited):
+        await b.run("b2", noop)
