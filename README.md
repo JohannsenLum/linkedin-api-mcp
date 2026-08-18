@@ -283,10 +283,14 @@ actually been checked against a live account, and what hasn't.
   |---|---|---|---|
   | Minimum interval between actions | 2 seconds | `LINKEDIN_MIN_INTERVAL` | Calls are paced against the previous one, not run back-to-back. |
   | Actions per rolling hour | 120 | `LINKEDIN_MAX_PER_HOUR` | Once hit, further calls fail immediately with a `rate_limited` error rather than queueing or sleeping. |
+  | Rate-limit state file | `~/.linkedin-api-mcp/rate_limit.json` | `LINKEDIN_RATE_STATE` | Rolling-hour timestamps are stored here so a restart or a second process sharing this path keeps the same ceiling. |
 
-  The ceiling is local to this server: it exists to stop a looping agent from
-  generating a burst of LinkedIn traffic, not because LinkedIn told us these
-  numbers. Lowering them is always safe; raising them is you deciding you're
+  The ceiling is local to this machine and cookie user, not LinkedIn's own
+  limits. It exists to stop a looping agent from generating a burst of LinkedIn
+  traffic. The hourly counter is written to disk under a file lock so killing
+  the process does not reset it, and two servers pointed at the same state file
+  share one budget. The minimum interval between actions is still per process.
+  Lowering the limits is always safe; raising them is you deciding you're
   willing to accept more risk than the defaults assume.
 - **Prompt-injection fencing on all scraped free text.** Anything read off a
   LinkedIn page (a headline, an about section, a message) passes through your
